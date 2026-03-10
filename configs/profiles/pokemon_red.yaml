@@ -1,0 +1,88 @@
+ram:
+  map_id: 0xD35E
+  x_pos: 0xD362
+  y_pos: 0xD361
+  hp: 0xD16C
+  party_size: 0xD163
+  level: 0xD18C
+  badges: 0xD356
+  extra:
+    is_dialogue_ram: 0xC0AB
+    sprites_enabled: 0xFFD6
+    max_menu_item: 0xCC28
+    battle_state: 0xD057
+    player_facing: 0xD358
+    script_flags: 0xD730
+    joy_ignore: 0xCD60
+    joy_simulation: 0xCD38
+    first_name_char: 0xD158
+    enemy_hp_high: 0xCFE6
+    enemy_hp_low: 0xCFE7
+    enemy_level: 0xCFF3
+    player_active_hp_high: 0xD015
+    player_active_hp_low: 0xD016
+    party_count: 0xD163
+    slot_1_hp_high: 0xD16C
+    slot_1_hp_low: 0xD16D
+    slot_1_max_hp_high: 0xD18D
+    slot_1_max_hp_low: 0xD18E
+    slot_1_level: 0xD18C
+    badges_byte: 0xD356
+    pokedex_flag: 0xD2F7
+    menu_index: 0xCC24
+    item_index: 0xCC26
+    input_mask: 0xCF8B
+    text_speed: 0xCF14
+    money_byte_1: 0xD347
+    money_byte_2: 0xD348
+    money_byte_3: 0xD349
+    dialogue_index: 0xCD38
+    tile_under_player: 0xD360
+maps:
+  0: "Intro/Naming Screen"
+  1: "Pallet Town"
+  2: "Viridian City"
+  12: "Route 1"
+  37: "Red's House (1F)"
+  38: "Red's House (2F - Bedroom)"
+  39: "Red's House (2F - Bedroom)"
+  40: "Professor Oak's Lab"
+  41: "Rival's House"
+curriculum:
+  - name: "PALLET_WORLD"
+    address: 0xD35E
+    target_value: 1
+    description: "Exit the intro and reach the Pallet Town world map."
+  - name: "HAS_POKEMON"
+    address: 0xD11B
+    target_value: 1
+    description: "Obtain a starter Pokemon from Professor Oak."
+  - name: "ROUTE_1"
+    address: 0xD35E
+    target_value: 12
+    description: "Successfully walk north into Route 1."
+  - name: "VIRIDIAN_CITY"
+    address: 0xD35E
+    target_value: 2
+    description: "Reach Viridian City."
+  - name: "LEVEL_7"
+    address: 0xD18C
+    target_value: 7
+    description: "Level up the starter Pokemon to Level 7."
+  - name: "FIRST_BADGE"
+    address: 0xD356
+    target_value: 1
+    description: "Defeat Brock and earn the Boulder Badge."
+known_locations:
+  - "POKEMON CENTER"
+  - "POKEMART"
+  - "GYM"
+  - "LAB"
+  - "PROF. OAK"
+intro_guidance: |
+  INTRO PHASE DETECTED:
+  - If you see the GameFreak logo or Title Screen, press START.
+  - If you see 'NEW GAME', press A.
+  - During Professor Oak's speech, press A repeatedly to advance text.
+  - On the NAMING SCREEN: Use D-Pad to move to letters, press A to select. Press START when done.
+  - In the BEDROOM (Map 39): This is the starting room. You need to walk to the STAIRS at the top-right to go down to the first floor.

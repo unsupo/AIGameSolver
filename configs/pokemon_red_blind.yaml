@@ -1,0 +1,13 @@
+name: "Pokemon Red (Vision Only)"
+emulator: "pyboy"
+rom: "data/roms/Pokemon - Red Version.gb"
+controller: "gb"
+brain: "agentic"
+perception_level: "vision_only"  # <--- The AI is now blind to the RAM
+steps: 1000
+render_delay: 0.05
+rewards:
+  - type: "exploration"
+    params:
+      threshold: 0.1
+      stagnation_penalty: 0.1

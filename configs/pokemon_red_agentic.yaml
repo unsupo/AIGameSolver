@@ -1,0 +1,23 @@
+name: "Pokemon Red Agentic"
+emulator: "gb"
+rom: "data/roms/Pokemon - Red Version.gb"
+controller: "gb"
+profile_path: "configs/profiles/pokemon_red.yaml"
+vision: "facebook/dinov2-small"
+rewards:
+  - type: "exploration"
+    params:
+      threshold: 0.1
+  - type: "dialogue_discovery"
+    params:
+      reward_value: 5.0
+brain: "agentic"
+llm_model: "gemma3:4b"
+# planner_model: "gemma3:12b"
+# reflector_model: "gemma3:12b"
+steps: 1000
+heuristics:
+  intro_map_id: 0
+  overworld_map_id: 12
+  auto_pilot_until_map: 0
+render_delay: 0.01

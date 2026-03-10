@@ -1,0 +1,21 @@
+name: "Pokemon Red"
+emulator: "gb"
+rom: "data/roms/Pokemon - Red Version.gb"
+controller: "gb"
+profile_path: "configs/profiles/pokemon_red.yaml"
+vision: "facebook/dinov2-small"
+heuristics:
+  intro_map_ids: [0, 39]
+  overworld_map_id: 1
+  auto_pilot_until_map: 0
+rewards:
+  - type: "exploration"
+    params:
+      threshold: 0.1
+  - type: "curiosity"
+    params:
+      novelty_reward: 2.0
+      visit_penalty: -0.5
+      penalty_threshold: 10
+brain: "walk"
+steps: 5000

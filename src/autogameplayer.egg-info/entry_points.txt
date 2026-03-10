@@ -1,0 +1,8 @@
+[console_scripts]
+llm_coach = scripts.llm_coach:main
+llm_play = autogameplayer.runner.llm_turnkey:main
+nexus = autogameplayer.runner.single:main
+pool = autogameplayer.runner.parallel:main
+rl_train = autogameplayer.core.rl_trainer:main
+run_autogame = autogameplayer.runner.cli:main
+train = autogameplayer.core.trainer:main

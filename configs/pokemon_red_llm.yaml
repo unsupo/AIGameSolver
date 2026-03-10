@@ -1,0 +1,16 @@
+name: "Pokemon Red LLM"
+emulator: "gb"
+rom: "data/roms/Pokemon - Red Version.gb"
+controller: "gb"
+profile_path: "configs/profiles/pokemon_red.yaml"
+vision: "facebook/dinov2-small"
+rewards:
+  - type: "exploration"
+    params:
+      threshold: 0.1
+brain: "llm"
+steps: 1000
+heuristics:
+  intro_map_id: 0
+  overworld_map_id: 12
+  auto_pilot_until_map: 12

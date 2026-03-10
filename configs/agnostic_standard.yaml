@@ -1,0 +1,23 @@
+# Universal Game Nexus - Agnostic Configuration
+name: "Agnostic_Runner"
+rom: "data/roms/Pokemon - Red Version.gb"  # Placeholder, can be overridden by --rom
+emulator: "auto"              # Uses Registry.create_emulator
+controller: "dynamic"         # Triggers get_capabilities tool
+
+# Vision & Intelligence
+vision: "facebook/dinov2-small"
+brain: "agentic_v2"           # The new agnostic Actor/Planner
+perception_level: "full"      # Vision + Agnostic Memory Dumps
+
+# Evolution & Training Settings
+steps: 1000
+render_delay: 0.02
+
+# Agnostic Reward Structure
+rewards:
+  - type: "exploration"       # Visual-stagnation based reward
+    params:
+      threshold: 0.15
+  - type: "dialogue_discovery" # Text-hash based reward
+    params:
+      reward_value: 5.0

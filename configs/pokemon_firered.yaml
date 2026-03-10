@@ -1,0 +1,14 @@
+name: "Pokemon FireRed"
+emulator: "gba"
+rom: "data/roms/Pokemon - FireRed Version (USA, Europe) (Rev 1).gba"
+controller: "gba"
+vision: "facebook/dinov2-small"
+rewards:
+  - type: "exploration"
+    params:
+      threshold: 0.1
+  - type: "ocr"
+    params:
+      keywords: ["WIN", "LEVEL UP", "BADGE"]
+brain: "intro"
+steps: 100

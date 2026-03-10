@@ -1,0 +1,11 @@
+name: "Pokemon Crystal"
+emulator: "gbc"
+rom: "data/roms/Pokemon - Crystal Version (USA, Europe).gbc"
+controller: "gb"
+vision: "facebook/dinov2-small"
+rewards:
+  - type: "exploration"
+    params:
+      threshold: 0.1
+brain: "random"
+steps: 100
