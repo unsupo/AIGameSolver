@@ -93,20 +93,13 @@ class AgenticBrain(Brain):
             self._is_reflecting = True
             async def run_reflection():
                 try:
-                    # Decide on scan depth (Standard or Deep)
                     limit = 500 if self.step_count % 500 == 0 else 100
                     await self.reflector.analyze_session(self.session_id, self.long_term_memory, limit=limit)
                     
-                    # --- FEATURE: Genetic Macro Evolution ---
-                    # Periodically mine for new patterns and evolve existing ones
                     if self.optimizer:
-                        # 1. Sequence Mining: Find high-reward frequent patterns in replay buffer
                         self.optimizer.mine_sequences(top_k=5)
-                        # 2. Population Evolution: Mutate/Crossover top proven skills
                         self.optimizer.evolve_population(top_k=5)
-                        # 3. Compression: Give them semantic names
                         await self.optimizer.async_compress_skills()
-                    # ----------------------------------------
                 finally:
                     self._is_reflecting = False
 
@@ -121,27 +114,20 @@ class AgenticBrain(Brain):
         if observation.guidance and "STAGNATION" in observation.guidance:
             self.stagnation_counter += 1
             
-            # --- FEATURE: Instant Debug Reflection ---
-            # If we just hit a zero-progress state, trigger a debugger reflection
             if self.stagnation_counter == 10:
                 print("🧠 Triggering Instant Debug Reflection...")
                 task = asyncio.create_task(self.reflector.analyze_failure(
-                    self.session_id, self.long_term_memory, map_id, pos, observation
+                    self.session_id, self.long_term_memory, map_id, self.last_pos, observation
                 ))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
-            # -----------------------------------------
 
-            # --- FEATURE: Progressive Entropy ---
-            # Gently increase drift before a full rollback to break out of UI locks
             if 5 < self.stagnation_counter < 30 and self.stagnation_counter % 5 == 0:
                 print(f"⚠️ Stagnation at {self.stagnation_counter}. Injecting entropy to force exploration.")
                 self.drift_steps = 3 
-            # ------------------------------------
 
-            # --- Timeline Branching (MCTS-Lite) ---
             if self.stagnation_counter >= 30:
-                rollback_slot = 1 # Default fallback
+                rollback_slot = 1 
                 if self.last_rolling_save_step > 0:
                     print(f"🚨 CRITICAL STAGNATION ({self.stagnation_counter}): Branching timeline. Rolling back to Slot {rollback_slot}...")
                 
@@ -157,7 +143,6 @@ class AgenticBrain(Brain):
                 self.memory.record_step(observation, action)
                 self.step_count += 1
                 return action
-            # -----------------------------------------------------------
 
             recent_escape_buttons = [
                 s.button for s in list(self.memory.steps)[-4:] 
@@ -276,7 +261,8 @@ class AgenticBrain(Brain):
                     else:
                         print(f"⚠️ Pathfinder: No path found from {start_pos} to {action.target_coords}. Falling back to LLM action.")
 
-                if self.drift_steps > 0: self.drift_steps -= 1
+                if self.drift_steps > 0:
+                    self.drift_steps -= 1
             except Exception:
                 action = self.fallback_action(self.controller)
 
@@ -293,55 +279,6 @@ class AgenticBrain(Brain):
                     plan, recalled = await self.planner.generate_plan(observation, self.long_term_memory)
                     self.current_plan = plan
                     self.last_recalled_memories = recalled
-                    
-                    # --- FEATURE: Hardware-Accelerated Tree Search (MCTS-Lite) ---
-                    # If the planner flags this as high-stakes, simulate branches in parallel
-                    if plan.get('high_stakes') and mcp_client:
-                        print("🌿 HIGH STAKES DETECTED: Initializing Timeline Branching...")
-                        # 1. Save current state as the root for branching
-                        await mcp_client.call_tool("manage_checkpoint", {"action": "save", "slot": 99})
-                        
-                        # 2. Define 4 experimental paths (Directional exploration)
-                        # We use simple macros to test which direction leads to most novelty
-                        branch_macros = [
-                            [Action(button="up", duration=30, until_visual_change=True)],
-                            [Action(button="down", duration=30, until_visual_change=True)],
-                            [Action(button="left", duration=30, until_visual_change=True)],
-                            [Action(button="right", duration=30, until_visual_change=True)]
-                        ]
-                        
-                        # Use Orchestrator to run parallel simulations
-                        # (We use random brains for the workers to test the macros)
-                        from autogameplayer.orchestrator.orchestrator import Orchestrator
-                        orch = Orchestrator(num_workers=4, rom_path=self.config.rom)
-                        
-                        # We don't need full genomes, just evaluate the macros
-                        # For now, we simulate by actually running short episodes from Slot 99
-                        print(f"  - Simulating {len(branch_macros)} directional branches...")
-                        # (Optimization: In a real MCTS we'd pass the macro to the worker)
-                        # Here we use the existing Orchestrator infrastructure
-                        results = orch.evaluate_population(
-                            genomes=[np.zeros(1)] * 4, # Dummy genomes
-                            steps_per_episode=50,
-                            initial_slot=99
-                        )
-                        
-                        # 3. Identify the Winner (Highest Reward/Novelty)
-                        best_reward = -float('inf')
-                        best_idx = 0
-                        for i, res in enumerate(results):
-                            if res['reward'] > best_reward:
-                                best_reward = res['reward']
-                                best_idx = i
-                        
-                        # 4. Rollback main timeline to the WINNING branch
-                        # In this implementation, workers don't share save states back to main easily
-                        # so we just guide the main brain to take that first "winning" step.
-                        winning_dir = ["UP", "DOWN", "LEFT", "RIGHT"][best_idx]
-                        print(f"✅ Tree Search Complete. Winner: {winning_dir} (Reward: {best_reward:.2f}). Redirecting.")
-                        self.current_plan['goal'] = f"Tree Search Winner: Move {winning_dir} to maximize novelty."
-                        self.current_plan['steps'] = [f"Move {winning_dir} aggressively"]
-                    # -------------------------------------------------------------
                 finally:
                     self._is_planning = False
             
@@ -382,7 +319,7 @@ class AgenticBrain(Brain):
         self.memory.update_last_step(observation, is_stuck)
 
         if critic_guidance:
-            observation.guidance = critic_guidance
+            observation.guidance = (observation.guidance + "\n" + critic_guidance) if observation.guidance else critic_guidance
             
         if is_loop:
             msg = f"CRITICAL WARNING (Loop Detected): State hash {observation.state_hash} is part of a visual loop. AVOID OLD STRATEGY HERE."
@@ -393,23 +330,35 @@ class AgenticBrain(Brain):
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
         
+        # --- FEATURE: Odometer (Move Validation) ---
         if self.last_action_obj and self.last_button in ["up", "down", "left", "right"]:
             steps = self.last_action_obj.repeat
             ex, ey = self.last_pos
-            if self.last_button == "up": ey -= steps
-            elif self.last_button == "down": ey += steps
-            elif self.last_button == "left": ex -= steps
-            elif self.last_button == "right": ex += steps
+            if self.last_button == "up":
+                ey -= steps
+            elif self.last_button == "down":
+                ey += steps
+            elif self.last_button == "left":
+                ex -= steps
+            elif self.last_button == "right":
+                ex += steps
             
             actual_pos = pos
             if actual_pos != (ex, ey) and map_id == self.last_map_id:
                 bx, by = actual_pos
-                if self.last_button == "up": by -= 1
-                elif self.last_button == "down": by += 1
-                elif self.last_button == "left": bx -= 1
-                elif self.last_button == "right": bx += 1
+                if self.last_button == "up":
+                    by -= 1
+                elif self.last_button == "down":
+                    by += 1
+                elif self.last_button == "left":
+                    bx -= 1
+                elif self.last_button == "right":
+                    bx += 1
                 
-                print(f"🚧 Odometer: Collision at {bx}, {by}. Incrementing impassable score.")
+                collision_msg = f"🚧 Odometer: Collision at ({bx}, {by}). This tile is BLOCKED."
+                print(collision_msg)
+                observation.guidance = (observation.guidance + "\n" + collision_msg) if observation.guidance else collision_msg
+                
                 task = asyncio.create_task(self.long_term_memory.record_collision(map_id, bx, by))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
@@ -509,6 +458,12 @@ class AgenticBrain(Brain):
                 
                 if map_id != self.last_map_id:
                     self.maps_discovered += 1
+                    print(f"✨ New Area Discovered: Map #{map_id}. Saving 'Gold' state to Slot 0.")
+                    if mcp_client:
+                        asyncio.create_task(mcp_client.call_tool("manage_checkpoint", {"action": "save", "slot": 0}))
+                    
+                    asyncio.create_task(self.reflector.analyze_session(self.session_id, self.long_term_memory, limit=50))
+
                     desc = f"ACHIEVEMENT: Entered Map #{map_id} at {pos}."
                     task = asyncio.create_task(self.long_term_memory.add_memory(desc, {"map_id": map_id, "type": "location"}))
                     self._tasks.add(task)

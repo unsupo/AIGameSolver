@@ -1,7 +1,7 @@
 import sqlite3
 import time
 from pathlib import Path
-from typing import Callable, Any
+from typing import Callable
 import functools
 import asyncio
 
@@ -70,6 +70,7 @@ def ensure_ltm_schema(db_path: Path):
                     CREATE TABLE IF NOT EXISTS memories (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         text TEXT UNIQUE,
+                        type TEXT, -- milestone, reasoning, reflection, etc.
                         metadata TEXT,
                         embedding BLOB
                     )
@@ -150,29 +151,32 @@ def ensure_ltm_schema(db_path: Path):
                         state INTEGER DEFAULT 1, -- Deprecated, use impassable_score
                         impassable_score REAL DEFAULT 0.0, -- 0.0 (Walkable) to 1.0 (Static Wall)
                         is_warp INTEGER DEFAULT 0, -- 1 if this tile triggers a map transition
-                        visit_count INTEGER DEFAULT 1, -- Tracks how many times this specific tile was entered
                         last_seen REAL,
                         PRIMARY KEY(map_id, x, y)
                     )
                 """)
                 
-                # --- MIGRATION: Add columns if they don't exist ---
+                # --- MIGRATIONS ---
+                try:
+                    conn.execute("ALTER TABLE memories ADD COLUMN type TEXT")
+                except sqlite3.OperationalError:
+                    pass
+
                 try:
                     conn.execute("ALTER TABLE explored_locations ADD COLUMN state INTEGER DEFAULT 1")
-                except sqlite3.OperationalError: pass
+                except sqlite3.OperationalError:
+                    pass
                 
                 try:
                     conn.execute("ALTER TABLE explored_locations ADD COLUMN impassable_score REAL DEFAULT 0.0")
-                except sqlite3.OperationalError: pass
+                except sqlite3.OperationalError:
+                    pass
 
                 try:
                     conn.execute("ALTER TABLE explored_locations ADD COLUMN is_warp INTEGER DEFAULT 0")
-                except sqlite3.OperationalError: pass
-
-                try:
-                    conn.execute("ALTER TABLE explored_locations ADD COLUMN visit_count INTEGER DEFAULT 1")
-                except sqlite3.OperationalError: pass
-                # -------------------------------------------------------
+                except sqlite3.OperationalError:
+                    pass
+                # ------------------
                 
                 conn.commit()
             return

@@ -1,10 +1,12 @@
 import json
 import numpy as np
+import time
 from pathlib import Path
 from typing import Any
 from autogameplayer.utils.llm import LLMClientProtocol
 from autogameplayer.core.optimizer import StrategyOptimizer
-from autogameplayer.utils.database import get_db_connection, database_write
+from autogameplayer.utils.database import database_write
+from autogameplayer.core.models import Observation
 
 class ReflectionAgent:
     """Agent that analyzes session history to distill and evolve macros."""
@@ -45,13 +47,15 @@ class ReflectionAgent:
 
     def calculate_visual_delta(self, v1: np.ndarray, v2: np.ndarray) -> float:
         """Calculates Euclidean distance between two vision vectors."""
-        if v1 is None or v2 is None: return 0.0
+        if v1 is None or v2 is None:
+            return 0.0
         return float(np.linalg.norm(v1 - v2))
 
     async def analyze_session(self, session_id: str, ltm: Any, limit: int = 100):
         """Reviews recent history to identify breakthroughs and traps."""
         steps = ltm.get_steps_by_session(session_id, limit=limit)
-        if len(steps) < 10: return
+        if len(steps) < 10:
+            return
         
         # Sort by step index ascending for chronological analysis
         steps.sort(key=lambda x: x['step_index'])
@@ -130,19 +134,23 @@ class ReflectionAgent:
             # 1. Save new breakthrough macros
             for b in analysis.get("breakthroughs", []):
                 start_idx = b.get("start_index")
-                if start_idx is None: continue
+                if start_idx is None:
+                    continue
                 
                 # Get vision vector from the DB at the start step
                 # We can find the step in our current 'steps' list
                 start_step = next((s for s in steps if s['step_index'] == start_idx), None)
-                if not start_step: continue
+                if not start_step:
+                    continue
                 
                 vision_vec = np.frombuffer(start_step['vision_vector'], dtype=np.float32).tolist() if start_step['vision_vector'] else None
-                if not vision_vec: continue
+                if not vision_vec:
+                    continue
                 
                 # Find steps in this range to calculate reward and metadata
                 range_steps = [s for s in steps if start_idx <= s['step_index'] <= b.get('end_index', start_idx + 10)]
-                if not range_steps: continue
+                if not range_steps:
+                    continue
                 
                 reward_sum = sum(s['reward'] for s in range_steps)
                 efficiency = reward_sum / max(1, len(range_steps))
@@ -206,13 +214,23 @@ class ReflectionAgent:
 
     @database_write("optimizer.db_path")
     def _update_skill_name(self, vision_hash: str, skill_name: str):
-...
-        except Exception: pass
+        """Internal helper to promote a macro to a permanent named skill."""
+        try:
+            import sqlite3
+            with sqlite3.connect(str(self.optimizer.db_path), timeout=10) as conn:
+                conn.execute(
+                    "UPDATE skills SET name = ?, compressed = 1, reliability = 1.0 WHERE vision_hash = ?",
+                    (skill_name, vision_hash)
+                )
+                conn.commit()
+        except Exception:
+            pass
 
     async def analyze_failure(self, session_id: str, ltm: Any, map_id: int, pos: tuple, observation: Observation):
         """Instant reflection for real-time debugging of stuck states."""
         steps = ltm.get_steps_by_session(session_id, limit=10)
-        if not steps: return
+        if not steps:
+            return
         
         # Chronological order
         steps.sort(key=lambda x: x['step_index'])

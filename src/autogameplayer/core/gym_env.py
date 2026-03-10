@@ -11,7 +11,6 @@ from autogameplayer.core.config_loader import load_game_config
 from autogameplayer.core.registry import Registry
 from autogameplayer.utils.launcher import ServerLauncher
 from autogameplayer.utils.process import get_base_env
-import autogameplayer.rewards
 
 class UniversalRLWrapper(gym.Env):
     """A game-agnostic Gymnasium wrapper around the asynchronous MCP EmulatorEnvironment."""
@@ -93,6 +92,7 @@ class UniversalRLWrapper(gym.Env):
         if self.client:
             try:
                 self.loop.run_until_complete(self.client.disconnect())
-            except Exception: pass
+            except Exception:
+                pass
         self.launcher.stop()
         self.loop.close()

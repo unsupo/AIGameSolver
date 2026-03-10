@@ -133,8 +133,8 @@ def main():
         st.session_state.collision_alert = None
 
     st.sidebar.title("🎮 AGP Nexus")
-    worker_port = st.sidebar.number_input("Worker Port", min_value=8000, max_value=8100, value=settings.server_port)
-    if st.sidebar.button("🔄 Sync Capabilities"):
+    worker_port = st.sidebar.number_input("Worker Port", min_value=8000, max_value=8100, value=settings.server_port, key="sidebar_port_input")
+    if st.sidebar.button("🔄 Sync Capabilities", key="sidebar_sync_btn"):
         caps = fetch_capabilities(worker_port)
         if caps:
             st.session_state.supported_buttons = caps.get('supported_buttons', [])
@@ -429,7 +429,7 @@ def main():
                 
                 grid_fig = render_spatial_grid(db_path, grid_map_id, player_x, player_y, map_name=map_name)
                 if grid_fig:
-                    grid_chart.plotly_chart(grid_fig, use_container_width=True, key="spatial_grid")
+                    grid_chart.plotly_chart(grid_fig, use_container_width=True, key="main_spatial_grid_plot")
                 else:
                     grid_chart.info(f"No exploration data for {map_name}.")
             

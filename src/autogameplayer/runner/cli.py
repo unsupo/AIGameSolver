@@ -1,7 +1,7 @@
 import argparse
 import asyncio
-import sys
-import os
+import signal
+from pathlib import Path
 
 from autogameplayer.core.config_loader import load_game_config, GameConfig
 from autogameplayer.core.mcp_client import MCPClient
@@ -9,15 +9,18 @@ from autogameplayer.core.environment import EmulatorEnvironment
 from autogameplayer.core.runner import GameRunner
 from autogameplayer.core.config import settings
 from autogameplayer.core.registry import Registry
-import autogameplayer.core.controllers
+import autogameplayer.core.controllers # noqa: F401
 
 # Import modules to trigger registration
-from autogameplayer.brains.macro_wrapper import MacroAwareBrain
-import autogameplayer.brains.agentic_brain
-import autogameplayer.brains.llm_brain
-import autogameplayer.brains.random_brain
-import autogameplayer.brains.walk_brain
-import autogameplayer.rewards
+from autogameplayer.brains.macro_wrapper import MacroAwareBrain # noqa: F401
+import autogameplayer.brains.agentic_brain # noqa: F401
+import autogameplayer.brains.llm_brain # noqa: F401
+import autogameplayer.brains.random_brain # noqa: F401
+import autogameplayer.brains.walk_brain # noqa: F401
+import autogameplayer.rewards.exploration # noqa: F401
+import autogameplayer.rewards.dialogue # noqa: F401
+import autogameplayer.rewards.ocr # noqa: F401
+import autogameplayer.rewards.pokemon # noqa: F401
 
 def get_rewards(config: GameConfig, client: MCPClient):
     rewards = []
@@ -26,110 +29,89 @@ def get_rewards(config: GameConfig, client: MCPClient):
             
     return rewards
 
-import signal
-
 async def run_autogame(config_path: str):
     config = load_game_config(config_path)
     print(f"🚀 Launching {config.name} stack...")
 
     server_url = f"http://{settings.server_host}:{settings.server_port}/sse"
     client = MCPClient(server_url)
-    brain = None
-    
-    # Setup shutdown event
-    shutdown_event = asyncio.Event()
-    
-    def handle_signal():
-        shutdown_event.set()
-        
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, handle_signal)
-    
+    await client.connect()
+
     try:
-        await client.connect()
-        
-        from autogameplayer.utils.llm import get_llm_client
-        llm_client = get_llm_client()
-        
-        env = EmulatorEnvironment(client, reward_functions=get_rewards(config, client))
-        controller = Registry.create_controller(config.controller)
-        brain = Registry.create_brain(config.brain, controller, config=config, llm_client=llm_client)
-        
-        # --- FEATURE: Macro Interception ---
-        # If the brain has an optimizer, wrap it to allow visual macro shortcuts
-        if hasattr(brain, 'optimizer') and brain.optimizer:
-            print(f"🔌 Enabling Macro Interception for {config.brain} brain.")
-            brain = MacroAwareBrain(brain, brain.optimizer)
-        # -----------------------------------
-        
-        # --- FEATURE: Auto-Resume (Bootstrap Slot 0) ---
-        # If we have an intro-cleared checkpoint, start there!
+        # Load Slot 0 if it exists
         try:
             print("💾 Checking for bootstrap checkpoint in slot 0...")
             await client.call_tool("manage_checkpoint", {"action": "load", "slot": 0})
             print("🚀 Bootstrap checkpoint loaded! (Pallet Town Start)")
         except Exception:
-            # Slot 0 might not exist if it's the first run
-            print("✨ No bootstrap found. Starting from Title Screen.")
-        # ---------------------------------------------
+            print("ℹ️ No bootstrap checkpoint found. Starting from current state.")
 
-        runner = GameRunner(env, brain)        
+        # Prepare Env
+        rewards = get_rewards(config, client)
+        env = EmulatorEnvironment(client, reward_functions=rewards)
+        
+        # Create Controller
+        controller = Registry.create_controller(config.controller)
+        
+        # Create Brain
+        from autogameplayer.utils.llm import get_llm_client
+        llm_client = get_llm_client()
+        brain = Registry.create_brain(config.brain, controller, config=config, llm_client=llm_client)
+        
+        # Enable Macro Interception
+        print(f"🔌 Enabling Macro Interception for {config.brain} brain.")
+        brain = MacroAwareBrain(brain, brain.optimizer)
+
+        # Handle Knowledge Ingestion
+        if config.profile and config.profile.known_locations:
+            from autogameplayer.core.knowledge import KnowledgeBase
+            kb = KnowledgeBase(llm_client)
+            for loc in config.profile.known_locations:
+                if loc.endswith(".md"):
+                    await kb.ingest_file(Path(loc))
+
+        # Runner
+        runner = GameRunner(env, brain, render_delay=config.render_delay)
+        
         print("🎮 AI is now playing! (Press Ctrl+C to stop safely and save)")
+        
+        # Main Loop with Shutdown Hook
+        shutdown_event = asyncio.Event()
+        
+        def handle_interrupt(*args):
+            print("\n✨ Initiating Graceful Shutdown...")
+            shutdown_event.set()
+            
+        signal.signal(signal.SIGINT, handle_interrupt)
+        
         while not shutdown_event.is_set():
             # Run in small increments to check shutdown_event frequently
             await runner.run(steps=min(config.steps, 10))
-            if shutdown_event.is_set(): break
+            if shutdown_event.is_set():
+                break
             await asyncio.sleep(0.1)
             
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        pass
-    except Exception as e:
-        msg = str(e).lower()
-        # Common connection errors during shutdown or interruption
-        conn_errors = ["peer closed connection", "connection closed", "cancel scope", "broken pipe", 
-                       "all connection attempts failed", "remoteprotocolerror", "incomplete chunked read"]
-        if any(err in msg for err in conn_errors):
-            pass 
-        elif msg.strip():
-            print(f"⚠️ AI Loop Error: {e}")
     finally:
-        # --- NEW: AUTO-SAVE ON EXIT ---
-        # If we reached here due to signal or loop exit
-        try:
-            if client.session and (shutdown_event.is_set() or sys.exc_info()[0] is KeyboardInterrupt):
-                print("\n🛑 Interrupted! Saving game state to Slot 1 before exiting...")
-                # We need a fresh connection or reuse existing if alive
-                await asyncio.wait_for(client.call_tool("manage_checkpoint", {"action": "save", "slot": 1}), timeout=3.0)
-                print("✅ Game saved successfully.")
-        except Exception:
-            # Silent failure during shutdown save
-            pass
-        # ------------------------------
-        
-        # Cleanup brain tasks
-        if brain:
+        # Cleanup
+        if 'brain' in locals():
             try:
                 await asyncio.wait_for(brain.close(), timeout=2.0)
-            except Exception: pass
+            except Exception:
+                pass
         
         # Final silent cleanup
         try:
-            await asyncio.wait_for(client.disconnect(), timeout=2.0)
+            await client.disconnect()
         except Exception:
             pass
 
 def main():
-    parser = argparse.ArgumentParser(description="AutoGamePlayer Turnkey CLI")
+    parser = argparse.ArgumentParser(description="AutoGamePlayer CLI")
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config")
     args = parser.parse_args()
 
-    if not os.path.exists(args.config):
-        print(f"❌ Error: Config file not found at {args.config}")
-        return
-
     try:
-        # Use a single-entry run to avoid loop shutdown noise
+        # Filter asyncio logs to reduce shutdown noise
         asyncio.run(run_autogame(args.config))
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass

@@ -1,8 +1,7 @@
 import sqlite3
 import json
 import heapq
-from collections import deque
-from typing import List, Tuple, Dict, Optional, Set
+from typing import List, Tuple, Dict
 from pathlib import Path
 
 class Pathfinder:
@@ -10,8 +9,11 @@ class Pathfinder:
     def __init__(self, db_path: Path):
         self.db_path = db_path
 
-    def _get_map_data(self, map_id: int) -> Dict[Tuple[int, int], float]:
-        """Returns a mapping of (x, y) -> impassable_score."""
+    def _get_weighted_map_data(self, map_id: int) -> Dict[Tuple[int, int], float]:
+        """
+        Queries the long_term_memory.db to retrieve all known tiles for a map
+        and their associated impassable_scores.
+        """
         grid_costs = {}
         
         try:
@@ -33,10 +35,14 @@ class Pathfinder:
                         x, y = coords[0], coords[1]
                         # If we were stuck while pressing UP, the tile ABOVE is likely a wall
                         wall_pos = None
-                        if btn == "up": wall_pos = (x, y-1)
-                        elif btn == "down": wall_pos = (x, y+1)
-                        elif btn == "left": wall_pos = (x-1, y)
-                        elif btn == "right": wall_pos = (x+1, y)
+                        if btn == "up":
+                            wall_pos = (x, y-1)
+                        elif btn == "down":
+                            wall_pos = (x, y+1)
+                        elif btn == "left":
+                            wall_pos = (x-1, y)
+                        elif btn == "right":
+                            wall_pos = (x+1, y)
                         
                         if wall_pos:
                             grid_costs[wall_pos] = max(grid_costs.get(wall_pos, 0), 0.9)
@@ -52,10 +58,12 @@ class Pathfinder:
         return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
     def find_path(self, map_id: int, start: Tuple[int, int], end: Tuple[int, int]) -> List[str]:
-        """Finds the most efficient sequence of buttons using cost-aware A* search."""
-        if start == end: return []
+        """Finds the most efficient sequence of buttons using Dijkstra-weighted A* search."""
+        if start == end:
+            return []
         
-        grid_costs = self._get_map_data(map_id)
+        # 1. Fetch the full map cost data from the SLAM grid
+        tile_costs = self._get_weighted_map_data(map_id)
         
         # Priority Queue for A*: (priority, current_coords, path)
         pq = [(0 + self._heuristic(start, end), start, [])]
@@ -76,24 +84,27 @@ class Pathfinder:
             if curr == end:
                 return path
                 
-            if curr in visited: continue
+            if curr in visited:
+                continue
             visited.add(curr)
             
-            if len(path) > 100: continue
+            if len(path) > 100:
+                continue
             
             curr_x, curr_y = curr
             for btn, (dx, dy) in directions:
                 neighbor = (curr_x + dx, curr_y + dy)
                 
-                # GET COST
-                # 0.0 = Walkable, 1.0 = Wall, default 0.1 for UNKNOWN (bias toward exploration)
-                tile_penalty = grid_costs.get(neighbor, 0.1)
+                # 2. Dynamic Cost Calculation
+                # 0.0 = Walkable, 1.0 = Wall
+                # Default 0.05 for UNKNOWN (Low exploration cost)
+                tile_penalty = tile_costs.get(neighbor, 0.05)
                 
                 if tile_penalty >= 0.9 and neighbor != end:
                     continue # Solid wall
                 
                 # Movement Cost = 1 (step) + (penalty * 10)
-                # This makes blocked tiles 10x more expensive than walkable ones
+                # Weighted cost ensures Dijkstra "wisdom" while A* provides "direction"
                 move_cost = 1 + (tile_penalty * 10)
                 new_g = g_score[curr] + move_cost
                 

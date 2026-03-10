@@ -81,9 +81,9 @@ class GameRunner:
         total_reward = 0.0
         
         # 2. Extract heuristics for intro-cleared detection
-        intro_maps = [0]
         if hasattr(target_brain, 'config') and target_brain.config and hasattr(target_brain.config, 'heuristics'):
-            intro_maps = target_brain.config.heuristics.intro_map_ids
+            # This logic was not using the variable, so we just check for its existence
+            _ = target_brain.config.heuristics.intro_map_ids
         
         try:
             for i in range(1, steps + 1):
@@ -102,7 +102,7 @@ class GameRunner:
                         print("🧹 Cleared Episodic Memory for new area.")
 
                     # 2. Bootstrap Save
-                    print(f"💾 Saving Best-So-Far Bootstrap to Slot 0...")
+                    print("💾 Saving Best-So-Far Bootstrap to Slot 0...")
                     await self.env.client.call_tool("manage_checkpoint", {"action": "save", "slot": 0})
 
                     # 3. FEATURE: Branching Evaluation (Optimal Route Search)
@@ -118,7 +118,8 @@ class GameRunner:
                 total_reward += reward
                 obs = next_obs
                 
-                if done: break
+                if done:
+                    break
                 
                 # Use configurable delay, but drop to 0 if a macro is active for "frame-perfect" TAS execution
                 effective_delay = 0 if action.macro else self.render_delay

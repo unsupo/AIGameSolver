@@ -38,7 +38,8 @@ class ActionCompressor:
     def detect_repeats(self) -> Optional[Dict[str, Any]]:
         """If the tail of the buffer is a repeating pattern, returns compression info."""
         seq = list(self.buffer)
-        if len(seq) < 4: return None
+        if len(seq) < 4:
+            return None
         
         # Check for simple single-button spam (e.g., A A A A)
         last_btn = seq[-1]
@@ -46,8 +47,10 @@ class ActionCompressor:
             # Found at least 4 repeats
             count = 0
             for b in reversed(seq):
-                if b == last_btn: count += 1
-                else: break
+                if b == last_btn:
+                    count += 1
+                else:
+                    break
             if count >= 4:
                 return {"type": "spam", "button": last_btn, "count": count}
         
@@ -86,7 +89,8 @@ class EpisodicMemory:
         self.steps.append(record)
 
     def update_last_step(self, obs: Observation, stuck: bool):
-        if not self.steps: return
+        if not self.steps:
+            return
         ctx = obs.state.context
         self.steps[-1].result_coords = (ctx.get('x', 0), ctx.get('y', 0))
         self.steps[-1].stuck = stuck
@@ -104,7 +108,8 @@ class EpisodicMemory:
 
     def warmup(self, historical_steps: List[Dict[str, Any]]):
         """Populates the episodic buffer with historical steps from a previous session."""
-        if not historical_steps: return
+        if not historical_steps:
+            return
         
         print(f"🔥 Warming up Episodic Memory with {len(historical_steps)} historical steps.")
         for step in reversed(historical_steps):
@@ -204,7 +209,8 @@ class LongTermMemory:
     @self_healing_db("storage_path")
     def get_successful_action(self, vision_vector: List[float], threshold: float = 0.95) -> Optional[Dict[str, Any]]:
         """Queries the replay buffer for highly successful actions in similar visual states."""
-        if not vision_vector: return None
+        if not vision_vector:
+            return None
         q_vec = np.array(vision_vector)
         
         try:
@@ -259,26 +265,19 @@ class LongTermMemory:
     @database_write("storage_path")
     @self_healing_db("storage_path")
     async def record_collision(self, map_id: int, x: int, y: int):
-        """Increments the impassable score for a tile when a collision is detected."""
+        """Immediately sets a tile as a hard wall (1.0) when a collision is detected."""
         try:
             with get_db_connection(self.storage_path) as conn:
-                cursor = conn.execute("SELECT impassable_score FROM explored_locations WHERE map_id = ? AND x = ? AND y = ?", (map_id, x, y))
-                row = cursor.fetchone()
-                if row:
-                    current_score = row[0] or 0.0
-                    if current_score == 0.0: new_score = 0.5 # First collision
-                    else: new_score = min(1.0, current_score + 0.1) # Subsequent
-                else:
-                    new_score = 0.5
-                
+                # Set score to 1.0 immediately for deterministic navigation
                 conn.execute(
                     """INSERT INTO explored_locations (map_id, x, y, impassable_score, last_seen) 
-                    VALUES (?, ?, ?, ?, ?) 
-                    ON CONFLICT(map_id, x, y) DO UPDATE SET impassable_score = ?, last_seen = ?""",
-                    (map_id, x, y, new_score, time.time(), new_score, time.time())
+                    VALUES (?, ?, ?, 1.0, ?) 
+                    ON CONFLICT(map_id, x, y) DO UPDATE SET impassable_score = 1.0, last_seen = ?""",
+                    (map_id, x, y, time.time(), time.time())
                 )
                 conn.commit()
-        except Exception: pass
+        except Exception:
+            pass
 
     @database_write("storage_path")
     @self_healing_db("storage_path")
@@ -344,7 +343,8 @@ class LongTermMemory:
                     severity = "BLOCKED" if row[2] >= 0.9 else "POTENTIALLY BLOCKED"
                     obstacles.append(f"({row[0]}, {row[1]}) [{severity}]")
                 
-                if not obstacles: return "No confirmed obstacles."
+                if not obstacles:
+                    return "No confirmed obstacles."
                 return f"KNOWN OBSTACLES: {', '.join(obstacles)}"
         except Exception:
             return "Obstacle data unavailable."
@@ -359,7 +359,8 @@ class LongTermMemory:
                     (map_id,)
                 )
                 tiles = cursor.fetchall()
-                if not tiles: return "This map is unexplored."
+                if not tiles:
+                    return "This map is unexplored."
                 
                 xs = [t[0] for t in tiles]
                 ys = [t[1] for t in tiles]
@@ -421,7 +422,8 @@ class LongTermMemory:
     @self_healing_db("storage_path")
     async def query_by_vision(self, vision_vector: List[float], top_k: int = 1) -> List[str]:
         """Retrieves memories by matching the Vision Encoder latent vector stored in metadata."""
-        if not vision_vector: return []
+        if not vision_vector:
+            return []
         q_vec = np.array(vision_vector)
         
         results = []
@@ -468,7 +470,8 @@ class LongTermMemory:
             with get_db_connection(self.storage_path) as conn:
                 cursor = conn.execute("SELECT text, metadata FROM memories")
                 return [{"text": row[0], "metadata": json.loads(row[1])} for row in cursor]
-        except Exception: return []
+        except Exception:
+            return []
 
     @memories.setter
     @database_write("storage_path")
@@ -479,7 +482,8 @@ class LongTermMemory:
                 conn.execute("DELETE FROM memories")
                 for m in value:
                     conn.execute("INSERT INTO memories (text, metadata) VALUES (?, ?)", (m['text'], json.dumps(m['metadata'])))
-        except Exception: pass
+        except Exception:
+            pass
 
     @property
     def embeddings(self) -> List[np.ndarray]:
@@ -488,7 +492,8 @@ class LongTermMemory:
             with get_db_connection(self.storage_path) as conn:
                 cursor = conn.execute("SELECT embedding FROM memories")
                 return [np.frombuffer(row[0], dtype=np.float32) if row[0] else np.zeros(1) for row in cursor]
-        except Exception: return []
+        except Exception:
+            return []
 
     @embeddings.setter
     def embeddings(self, value: List[np.ndarray]):

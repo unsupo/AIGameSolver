@@ -2,7 +2,7 @@ import base64
 from io import BytesIO
 from PIL import Image
 import numpy as np
-from typing import Optional, List
+from typing import Optional
 from collections import deque
 
 from autogameplayer.core.models import GameState, GameStage

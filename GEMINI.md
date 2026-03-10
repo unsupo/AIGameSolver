@@ -29,11 +29,13 @@ Dry and solid focus on agnostic architecture with a huge focus on turn-key autom
 - **Plan Structure:** The `PlannerAgent` MUST output a structured JSON plan containing a `goal`, `steps`, and an `abort_condition`.
 - **Cache Invalidation:** The planning cache MUST be invalidated whenever the AI is stuck (`is_stuck=True`) to force a fresh strategic goal from the LLM.
 - **Episodic Warmup:** On startup, the `AgenticBrain` MUST "warm up" its episodic memory by loading the last 50 steps from the replay buffer.
-- **Multi-Model Intelligence:** The system supports specialized models per agent. Prefer larger models (12b+) for `PlannerAgent` and `ReflectionAgent`, and smaller models (4b) for `ActorAgent` to maintain tactile speed.
+- **Cost-Aware Pathfinding:** The `Pathfinder` MUST use Dijkstra-weighted A* where `impassable_score` from the world map acts as a movement cost (Standard=1, Collision Penalty=10x).
+- **Macro Synthesis:** Any successful path found by the `Pathfinder` MUST be automatically promoted to a named skill (**`SKILL_PATH_TO_X_Y`**) in the `StrategyOptimizer` with high reliability.
 
 ### 6. Spatial & Procedural Memory
 - **Global World Map:** Every unique `(map_id, x, y)` coordinate visited across all sessions MUST be persisted to the `explored_locations` table.
-- **World Map Summary:** The planner MUST be provided with a summary of explored tiles for the current map to inform its navigation strategy.
+- **World Map Summary:** The planner MUST be provided with a summary of explored tiles for the current map.
+- **Hyper-Aggressive Collision:** If a movement button is pressed but RAM coordinates remain static, the system MUST immediately set the `impassable_score` for that tile to **1.0** (Hard Wall) in the world map.
 
 ### 7. Macro Learning & Matching (Self-TAS)
 - **Gold Run Logic:** The `ReflectionAgent` MUST prioritize "Gold Runs"—sequences with the highest **reward-to-step density**.
@@ -68,7 +70,10 @@ Dry and solid focus on agnostic architecture with a huge focus on turn-key autom
 - **Vision Warmup:** DINOv2 (`facebook/dinov2-small`) requires ~40-60s for initialization.
 
 ## 🛠️ Technical Implementation Guards
-- **Linting:** Mandate `uv run ruff check .` after any change. 
+- **Syntax Verification:** Every time code is modified, the system MUST run `uv run ruff check . --fix` to ensure syntax integrity and style consistency. If errors remain, they MUST be resolved manually before completing the task.
+- **Scope Safety:** Always initialize method-level variables (like `macro_json`, `description`) at the top of async methods. NEVER use `if 'var' in locals()` as it is fragile in asynchronous contexts.
+- **Multimodal Default:** Always include game screenshots in the LLM prompt for all models unless they are explicitly known to be text-only.
+- **Unified Dialogue/OCR:** The system MUST always run OCR for a frame if memory-based flags (`is_dialogue`, `is_menu_open`, or `battle_state > 0`) are set, even if `include_ocr` is globally False. Text content is critical for decision-making in these states.
 - **Robust Parsing:** Use `extract_json_from_llm_response` (regex-based) for all LLM outputs.
 - **Output Priming:** All agent prompts MUST include: *"Respond ONLY with a valid JSON object. Do not include markdown formatting, preamble, or conversational text."*
 - **Path Consistency:** Always use `settings.models_dir` for artifacts in `data/models/`.
@@ -77,6 +82,8 @@ Dry and solid focus on agnostic architecture with a huge focus on turn-key autom
 - **Dashboard Toggle:** Use `--no-dashboard` with `nexus` to skip Streamlit UI.
 - **Skill Inspection:** Use `uv run nexus --list-skills` to dump the macro registry.
 
-## 📼 Automated TAS Recording
-- **Auto-Start:** Recording starts when Slot 1 is loaded.
-- **Auto-Stop:** Recording stops and saves when Slot 1 is saved (Milestone) or on Stagnation Rollback.
+## 🤖 Autonomous Macro Synthesis
+- **Gold Run Discovery:** `ReflectionAgent` MUST analyze high-reward sequences and distill them into `SKILL_` macros in the SQL database.
+- **Macro Interception:** The `MacroAwareBrain` MUST check for exact `vision_hash` matches before invoking the LLM to provide 0-latency TAS execution.
+- **Genetic Refinement:** The `StrategyOptimizer` MUST periodically evolve the macro population using mutations (jittering frame counts) and crossover to find the fastest possible paths.
+- **Reward Speed Priority:** Mined sequences MUST be scored using `(frequency * reward) / total_frames` to prioritize efficiency.

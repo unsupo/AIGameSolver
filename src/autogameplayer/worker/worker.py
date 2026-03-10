@@ -16,7 +16,18 @@ from autogameplayer.utils.launcher import ServerLauncher
 from autogameplayer.utils.process import get_base_env, port_allocator
 from autogameplayer.rewards.exploration import ExplorationReward
 
-# Trigger registrations
+import autogameplayer.core.controllers # noqa: F401
+
+# Import modules to trigger registration
+from autogameplayer.brains.macro_wrapper import MacroAwareBrain # noqa: F401
+import autogameplayer.brains.agentic_brain # noqa: F401
+import autogameplayer.brains.llm_brain # noqa: F401
+import autogameplayer.brains.random_brain # noqa: F401
+import autogameplayer.brains.walk_brain # noqa: F401
+import autogameplayer.rewards.exploration # noqa: F401
+import autogameplayer.rewards.dialogue # noqa: F401
+import autogameplayer.rewards.ocr # noqa: F401
+import autogameplayer.rewards.pokemon # noqa: F401
 
 class Worker:
     """Encapsulates a single evaluation instance."""
@@ -48,8 +59,14 @@ class Worker:
                 if initial_slot != 0:
                     try:
                         await client.call_tool("manage_checkpoint", {"action": "load", "slot": 0})
-                    except Exception: pass
+                    except Exception:
+                        pass
                 
+            # Fetch config to create rewards
+            # Search for a config that matches the ROM or use a default
+            # For simplicity in workers, we might need a better way to pass the config
+            # But usually settings.llm_model etc are enough for the brain
+            
             rewards = [ExplorationReward()]
             env = EmulatorEnvironment(client, reward_functions=rewards)
             

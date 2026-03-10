@@ -1,9 +1,8 @@
-import json
 import random
 from autogameplayer.core.models import Observation
 from autogameplayer.core.config_loader import GameConfig
 from autogameplayer.utils.llm import LLMClientProtocol
-from .memory import EpisodicMemory, LongTermMemory
+from .memory import LongTermMemory
 
 class PlannerAgent:
     """Agent responsible for high-level strategy and goal setting."""
@@ -52,7 +51,7 @@ class PlannerAgent:
         loop_context = ""
         for mem in specific_memories:
             if "Loop Detected" in mem and obs.state_hash in mem:
-                loop_context = f"\n🚨 LOOP AVOIDANCE ACTIVE: You have been in a loop on this exact screen before. PURPOSEFULLY DEVIATE from your previous actions. Try random buttons or a completely different direction."
+                loop_context = "\n🚨 LOOP AVOIDANCE ACTIVE: You have been in a loop on this exact screen before. PURPOSEFULLY DEVIATE from your previous actions. Try random buttons or a completely different direction."
                 break
 
         # 3. Global Spatial Awareness (World Map)
@@ -132,13 +131,13 @@ class PlannerAgent:
         CRITICAL: Respond ONLY with a valid JSON object. Do not include markdown formatting, preamble, or any conversational text.
 
         OUTPUT: JSON ONLY with the following structure:
-        {
+        {{
           "goal": "A specific, measurable long-term objective (e.g., 'Defeat Brock at Pewter Gym')",
           "steps": ["Step 1", "Step 2", "Step 3"],
           "abort_condition": "When to abandon this specific plan",
           "expected_map_after": int or null,
-          "high_stakes": bool (True if this is a major choice like choosing a starter, entering a new area, or if we've been stuck for 50+ steps)
-        }
+          "high_stakes": bool
+        }}
         """
 
         try:
@@ -149,7 +148,7 @@ class PlannerAgent:
                 max_tokens=200,
                 temperature=0.7
             )
-
+            
             # Extract JSON from response
             plan_data = extract_json_from_llm_response(response)
             if not plan_data:
