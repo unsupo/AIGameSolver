@@ -18,6 +18,37 @@ class KnowledgeBase:
         self.model = model or settings.default_embedding_model
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        
+        # Trigger async auto-ingest in a background task or synchronously check
+        if not self.is_ready:
+            print("📚 Knowledge Base empty. Searching for data to ingest...")
+            self.sync_auto_ingest()
+
+    def sync_auto_ingest(self):
+        """Synchronous wrapper for auto_ingest to be called from __init__."""
+        import asyncio
+        try:
+            # We use a temporary event loop if one isn't running, or run_coroutine_threadsafe
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self.auto_ingest())
+            else:
+                loop.run_until_complete(self.auto_ingest())
+        except Exception:
+            pass
+
+    async def auto_ingest(self):
+        """Finds text files in data/knowledge and ingests them."""
+        knowledge_dir = settings.base_dir / "data" / "knowledge"
+        if not knowledge_dir.exists():
+            return
+
+        files = list(knowledge_dir.glob("*.txt")) + list(knowledge_dir.glob("*.md"))
+        for file in files:
+            print(f"📖 Auto-ingesting: {file.name}")
+            with open(file, "r") as f:
+                content = f.read()
+                await self.ingest_text(content, source=file.name)
 
     @property
     def is_ready(self) -> bool:
@@ -81,6 +112,9 @@ class KnowledgeBase:
                         results.append((sim, content))
             
             results.sort(key=lambda x: x[0], reverse=True)
-            return [t for sim, t in results[:top_k] if sim > 0.6]
+            snippets = [t for sim, t in results[:top_k] if sim > 0.6]
+            if snippets:
+                print(f"📖 RAG: Found {len(snippets)} relevant knowledge snippets.")
+            return snippets
         except Exception:
             return []

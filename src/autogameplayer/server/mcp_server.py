@@ -226,7 +226,18 @@ def create_server(rom_path: str, vision_encoder: VisionEncoder = None, port: int
     def get_guidance() -> str: return session.get_guidance()
 
     @mcp.tool()
-    def set_plan(plan: str): return session.set_plan(plan)
+    def set_plan(plan: str):
+        return session.set_plan(plan)
+
+    @mcp.tool()
+    def set_recalled_memories(memories: list[str]):
+        """Sets the currently recalled RAG memories for dashboard display."""
+        return session.set_recalled_memories(memories)
+
+    @mcp.tool()
+    def navigate_to(x: int, y: int):
+        """Sets a spatial navigation goal. The AI will attempt to find a path using A*."""
+        return session.set_navigation_goal(x, y)
 
     @mcp.tool()
     def start_recording():

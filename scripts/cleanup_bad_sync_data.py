@@ -1,6 +1,5 @@
 import sqlite3
 import os
-from pathlib import Path
 from autogameplayer.core.config import settings
 
 def cleanup():

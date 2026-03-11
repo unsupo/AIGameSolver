@@ -51,7 +51,7 @@ class AgenticBrain(Brain):
 
         self.planner = PlannerAgent(self.client, self.planner_model, self.config, optimizer=self.optimizer, knowledge=self.knowledge, critic=self.critic)
         self.actor = ActorAgent(self.client, self.model, self.controller.buttons, self.config, ltm=self.long_term_memory, optimizer=self.optimizer)
-        self.reflector = ReflectionAgent(self.client, self.reflector_model, self.optimizer)
+        self.reflector = ReflectionAgent(self.client, self.reflector_model, self.optimizer, knowledge=self.knowledge)
         
         self.current_plan = {"goal": "Explore the world and advance the story.", "steps": [], "abort_condition": "Stagnation", "expected_map_after": None}
         self.step_count = 0
@@ -245,19 +245,28 @@ class AgenticBrain(Brain):
                     session_metrics=session_metrics
                 )
 
-                if action.target_coords:
+                # --- FEATURE: Pathfinder Integration ---
+                # Check for target_coords from either Actor OR Global Server Goal
+                target_coords = action.target_coords
+                server_goal = ctx.get('target_coords')
+                
+                if server_goal and not target_coords:
+                    target_coords = server_goal
+                    print(f"🎯 Pathfinder: Using Global Navigation Goal: {target_coords}")
+
+                if target_coords:
                     goal_str = self.current_plan.get('goal', 'Unknown')
                     print(f"⏳ Actor: Deciding path for goal: '{goal_str}'")
                     start_pos = (ctx.get('x', 0), ctx.get('y', 0))
-                    path = self.pathfinder.find_path(map_id, start_pos, action.target_coords)
+                    path = self.pathfinder.find_path(map_id, start_pos, target_coords)
                     if path:
-                        print(f"📍 Pathfinder: Found path to {action.target_coords} ({len(path)} steps).")
+                        print(f"📍 Pathfinder: Found path to {target_coords} ({len(path)} steps).")
                         macro_actions = [Action(button=btn, duration=10, until_visual_change=True) for btn in path]
                         
                         # FEATURE: Macro Synthesis (Pathfinding to Skill)
                         if self.optimizer:
-                            skill_name = f"SKILL_PATH_TO_{action.target_coords[0]}_{action.target_coords[1]}"
-                            skill_desc = f"Pathfinder sequence from {start_pos} to {action.target_coords} on Map {map_id}."
+                            skill_name = f"SKILL_PATH_TO_{target_coords[0]}_{target_coords[1]}"
+                            skill_desc = f"Pathfinder sequence from {start_pos} to {target_coords} on Map {map_id}."
                             
                             # Convert Action list to simple dict sequence for optimizer
                             macro_json = [{"button": m.button, "frames": m.duration} for m in macro_actions]
@@ -285,10 +294,15 @@ class AgenticBrain(Brain):
 
                         action = Action(
                             macro=macro_actions,
-                            reasoning=f"Pathfinding to {action.target_coords} | {action.reasoning}"
+                            reasoning=f"Pathfinding to {target_coords} | {action.reasoning}"
                         )
+                        
+                        # Clear the global goal if it was used successfully
+                        if server_goal and mcp_client:
+                            asyncio.create_task(mcp_client.call_tool("clear_navigation_goal", {}))
                     else:
-                        print(f"⚠️ Pathfinder: No path found from {start_pos} to {action.target_coords}. Falling back to LLM action.")
+                        print(f"⚠️ Pathfinder: No path found from {start_pos} to {target_coords}. Falling back to LLM action.")
+                # ---------------------------------------
 
                 if self.drift_steps > 0:
                     self.drift_steps -= 1
@@ -308,6 +322,11 @@ class AgenticBrain(Brain):
                     plan, recalled = await self.planner.generate_plan(observation, self.long_term_memory)
                     self.current_plan = plan
                     self.last_recalled_memories = recalled
+                    
+                    if mcp_client:
+                        # Update the server so the dashboard sees the recalled memories
+                        asyncio.create_task(mcp_client.call_tool("set_recalled_memories", {"memories": recalled}))
+                        asyncio.create_task(mcp_client.call_tool("set_plan", {"plan": plan.get('goal', 'Unknown')}))
                 finally:
                     self._is_planning = False
             
@@ -405,8 +424,10 @@ class AgenticBrain(Brain):
 
             last_map_name = self.config.profile.maps.get(self.last_map_id, f"Map #{self.last_map_id}")
             curr_map_name = self.config.profile.maps.get(map_id, f"Map #{map_id}")
-            warp_msg = f"WARP MILESTONE: Transition from {last_map_name} {self.last_pos} to {curr_map_name} {pos}."
+            warp_msg = f"WARP DISCOVERY: Transition from {last_map_name} {self.last_pos} to {curr_map_name} {pos}."
             print(f"🌀 {warp_msg}")
+            
+            # 1. Record to Session LTM
             task = asyncio.create_task(self.long_term_memory.add_memory(warp_msg, {
                 "type": "warp", 
                 "from_map": self.last_map_id, "to_map": map_id,
@@ -414,6 +435,13 @@ class AgenticBrain(Brain):
             }))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
+
+            # 2. Record to Permanent Knowledge Base (RAG)
+            if self.knowledge:
+                asyncio.create_task(self.knowledge.ingest_text(
+                    f"{warp_msg} This coordinate is a door, stairs, or warp point.", 
+                    source="warp_discoveries"
+                ))
 
         if self.last_state_hash and self.last_action_obj:
             task = asyncio.create_task(self.long_term_memory.add_event_pattern(
@@ -437,6 +465,39 @@ class AgenticBrain(Brain):
                 task = asyncio.create_task(self.long_term_memory.record_location(map_id, pos[0], pos[1], state=1))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
+
+        # --- FEATURE: Proactive Dialogue Recording ---
+        if ocr and len(ocr) > 3:
+            # Check if this is a NEW dialogue we haven't noted in episodic memory yet
+            if ocr not in self.memory.seen_dialogues:
+                self.memory.seen_dialogues.add(ocr)
+                
+                btn_str = self.last_action_obj.button.upper() if self.last_action_obj and self.last_action_obj.button else "NONE"
+                discovery_text = f"DIALOGUE EVENT at {pos} on Map #{map_id}: I pressed {btn_str} and saw text: \"{observation.state.ocr_text}\""
+                
+                # 1. Record to Session LTM (Vector + Metadata)
+                task = asyncio.create_task(self.long_term_memory.add_memory(
+                    discovery_text, 
+                    {
+                        "type": "dialogue_discovery", 
+                        "map_id": map_id, "x": pos[0], "y": pos[1],
+                        "ocr": observation.state.ocr_text,
+                        "button": btn_str
+                    }
+                ))
+                self._tasks.add(task)
+                task.add_done_callback(self._tasks.discard)
+                
+                # 2. Record to Permanent Knowledge Base (RAG)
+                if self.knowledge:
+                    # We wrap it in a task to avoid blocking the main act loop
+                    asyncio.create_task(self.knowledge.ingest_text(
+                        discovery_text, 
+                        source=f"discovery_map_{map_id}"
+                    ))
+                
+                print(f"🗨️ Proactive Memory: Noted dialogue at {pos}")
+        # ---------------------------------------------
 
         if self.last_action_obj and self.last_action_obj.reasoning:
             reason_text = f"Action: {self.last_action_obj.button.upper() if self.last_action_obj.button else 'NONE'} | Why: {self.last_action_obj.reasoning}"

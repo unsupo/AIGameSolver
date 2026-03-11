@@ -36,6 +36,8 @@ class GameSession:
         self.guidance_message = ""
         self.current_plan = "Initializing strategic overseer..."
         self.last_load_slot = settings.tas_trigger_slot
+        self.recalled_memories = []
+        self.target_coords = None
 
         print(f"🎮 Initializing Emulator with ROM: {rom_path}...", flush=True)
         self.emulator = create_emulator(rom_path)
@@ -78,6 +80,8 @@ class GameSession:
         state.last_reasoning = self.last_reasoning
         state.current_plan = self.current_plan
         state.context["last_repeat"] = self.last_repeat
+        state.context["target_coords"] = self.target_coords
+        state.recalled_memories = self.recalled_memories
         return state
 
     def send_input(self, button: str, duration: int = 10, reasoning: str = "", repeat: int = 1, macro: list = None):
@@ -101,3 +105,15 @@ class GameSession:
     def set_plan(self, plan: str):
         self.current_plan = plan
         return f"Plan updated: {plan}"
+
+    def set_recalled_memories(self, memories: list[str]):
+        self.recalled_memories = memories
+        return f"Stored {len(memories)} recalled memories."
+
+    def set_navigation_goal(self, x: int, y: int):
+        self.target_coords = (x, y)
+        return f"Navigation goal set to ({x}, {y})"
+
+    def clear_navigation_goal(self):
+        self.target_coords = None
+        return "Navigation goal cleared."

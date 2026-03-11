@@ -185,14 +185,15 @@ class NavigatorAgent(BaseActor):
         HISTORY: {memory.get_recent_summary(5)}
         
         GUIDELINE:
-        - SET COORDINATE GOALS: Prefer providing "target_x" and "target_y" to use the automated A* pathfinder.
+        - SET COORDINATE GOALS: Prefer providing "target_x" and "target_y" to use the automated A* pathfinder. This will calculate the perfect sequence of moves using SLAM data.
         - Look at the Minimap/Sprites to identify stairs, doors, or NPCs.
         - If the path is clear, set a goal 5-10 tiles away in your desired direction.
         - WARNING: If tiles are marked BLOCKED, do not set them as target_x/y. Provide an alternative route.
+        - You can also output "target_x" and "target_y" to room-level targets (e.g., if you see a door at (10, 5)).
 
         CRITICAL: Respond ONLY with a valid JSON object. Do not include markdown formatting, preamble, or any conversational text.
 
-        OUTPUT: JSON {{"target_x": int, "target_y": int, "reasoning": "..."}}
+        OUTPUT: JSON {"target_x": int, "target_y": int, "reasoning": "..."} or standard button output.
         """
         result = await self._call_llm(prompt, obs, drift)
         return self._post_process_action(result, ctx, ctx.get('map_id', 0), ocr_text, drift)

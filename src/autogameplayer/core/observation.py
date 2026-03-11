@@ -102,7 +102,7 @@ class ObservationPipeline:
             vision_delta = float(np.linalg.norm(self.last_vision_vector - vision_vector))
         self.last_vision_vector = vision_vector
 
-        # 5. Extract OCR
+        # 5. Extract OCR (Crucial: Run on raw screenshot, NOT annotated_img)
         ocr_text = None
         has_dialogue_box = False
         has_dialogue_arrow = self._detect_dialogue_arrow(screenshot)
@@ -112,6 +112,7 @@ class ObservationPipeline:
         if include_ocr or force_ocr:
             try:
                 import pytesseract
+                # Use raw screenshot to avoid interference from overlays
                 ocr_text = pytesseract.image_to_string(screenshot).strip()
                 if ocr_text and len(ocr_text) > 5:
                     has_dialogue_box = True

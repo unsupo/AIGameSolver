@@ -10,10 +10,11 @@ from autogameplayer.core.models import Observation
 
 class ReflectionAgent:
     """Agent that analyzes session history to distill and evolve macros."""
-    def __init__(self, client: LLMClientProtocol, model: str, optimizer: StrategyOptimizer):
+    def __init__(self, client: LLMClientProtocol, model: str, optimizer: StrategyOptimizer, knowledge=None):
         self.client = client
         self.model = model
         self.optimizer = optimizer
+        self.knowledge = knowledge
 
     async def ingest_json_episode(self, episode_path: str, ltm: Any):
         """Processes an external JSON episode file into the replay buffer and reflects on it."""
@@ -131,6 +132,14 @@ class ReflectionAgent:
             if ltm:
                 await ltm.add_memory(f"Session Reflection: {summary}", {"type": "reflection", "session_id": session_id})
 
+            # --- FEATURE: Permanent Knowledge Distillation ---
+            # Save the summary into the Knowledge Base (RAG) so it persists across all future sessions
+            if self.knowledge:
+                knowledge_note = f"SESSION INSIGHT ({session_id}): {summary}"
+                await self.knowledge.ingest_text(knowledge_note, source=f"reflection_{session_id}")
+                print(f"📒 Permanent Knowledge Recorded: {summary[:50]}...")
+            # --------------------------------------------------
+
             # 1. Save new breakthrough macros
             for b in analysis.get("breakthroughs", []):
                 start_idx = b.get("start_index")
@@ -200,6 +209,10 @@ class ReflectionAgent:
                             "vision_vector": v_end.tolist() if v_end is not None else None
                         })
                         print(f"📍 Recorded Visual Landmark: {b['reason']}")
+                    
+                    # ALSO record to permanent knowledge
+                    if self.knowledge:
+                        await self.knowledge.ingest_text(landmark_desc, source="visual_landmarks")
                 # ------------------------------------------
                 
             # 2. Identify and Penalize Traps

@@ -266,25 +266,54 @@ class LongTermMemory:
     @database_write("storage_path")
     @self_healing_db("storage_path")
     async def record_collision(self, map_id: int, x: int, y: int):
-        """Immediately sets a tile as a hard wall (1.0) when a collision is detected."""
+        """Gradually increments the impassable score for a tile. Starts at 0.5, capped at 1.0."""
         try:
             with get_db_connection(self.storage_path) as conn:
-                # Set score to 1.0 immediately for deterministic navigation
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("SELECT impassable_score FROM explored_locations WHERE map_id = ? AND x = ? AND y = ?", (map_id, x, y))
+                row = cursor.fetchone()
+                
+                if row:
+                    current_score = row['impassable_score'] or 0.0
+                    # Increment by 0.2, capped at 1.0
+                    new_score = min(1.0, current_score + 0.2)
+                    if current_score == 0.0: new_score = 0.5 # Initial penalty
+                else:
+                    new_score = 0.5
+                
                 conn.execute(
                     """INSERT INTO explored_locations (map_id, x, y, impassable_score, last_seen) 
-                    VALUES (?, ?, ?, 1.0, ?) 
-                    ON CONFLICT(map_id, x, y) DO UPDATE SET impassable_score = 1.0, last_seen = ?""",
-                    (map_id, x, y, time.time(), time.time())
+                    VALUES (?, ?, ?, ?, ?) 
+                    ON CONFLICT(map_id, x, y) DO UPDATE SET impassable_score = ?, last_seen = ?""",
+                    (map_id, x, y, new_score, time.time(), new_score, time.time())
                 )
                 conn.commit()
-        except Exception:
-            pass
+        except Exception: pass
 
     @database_write("storage_path")
     @self_healing_db("storage_path")
     async def record_walkable(self, map_id: int, x: int, y: int):
-        """Mark a tile as walkable (0.0 impassable score)."""
-        await self.record_location(map_id, x, y, impassable_score=0.0)
+        """Reduces the impassable score for a tile (confidence building)."""
+        try:
+            with get_db_connection(self.storage_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("SELECT impassable_score FROM explored_locations WHERE map_id = ? AND x = ? AND y = ?", (map_id, x, y))
+                row = cursor.fetchone()
+                
+                if row:
+                    current_score = row['impassable_score'] or 0.0
+                    # Build confidence: reduce penalty by 0.2
+                    new_score = max(0.0, current_score - 0.2)
+                    
+                    conn.execute(
+                        "UPDATE explored_locations SET impassable_score = ?, last_seen = ? WHERE map_id = ? AND x = ? AND y = ?",
+                        (new_score, time.time(), map_id, x, y)
+                    )
+                    conn.commit()
+                else:
+                    # Brand new walkable tile
+                    await self.record_location(map_id, x, y, impassable_score=0.0)
+        except Exception: pass
 
     @database_write("storage_path")
     @self_healing_db("storage_path")
