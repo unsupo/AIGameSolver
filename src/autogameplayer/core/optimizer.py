@@ -455,16 +455,20 @@ class StrategyOptimizer:
                 for i in range(len(all_skills)):
                     if all_skills[i]['id'] in to_delete: continue
                     
-                    vec_i = np.frombuffer(all_skills[i]['vision_vector'], dtype=np.float32) if all_skills[i]['vision_vector'] else None
-                    if vec_i is None: continue
+                    v_blob_i = all_skills[i].get('vision_vector')
+                    if not v_blob_i: continue
+                    
+                    vec_i = np.frombuffer(v_blob_i, dtype=np.float32)
                     map_i = all_skills[i]['map_id']
                     
                     for j in range(i + 1, len(all_skills)):
                         if all_skills[j]['id'] in to_delete: continue
                         if all_skills[j]['map_id'] != map_i: continue 
                         
-                        vec_j = np.frombuffer(all_skills[j]['vision_vector'], dtype=np.float32) if all_skills[j]['vision_vector'] else None
-                        if vec_j is None: continue
+                        v_blob_j = all_skills[j].get('vision_vector')
+                        if not v_blob_j: continue
+                        
+                        vec_j = np.frombuffer(v_blob_j, dtype=np.float32)
                         
                         if True:
                             sim = cosine_similarity(vec_i, vec_j)

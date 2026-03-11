@@ -362,6 +362,18 @@ class ActorAgent:
         self.ltm = ltm
 
     async def get_next_action(self, obs: Observation, plan: dict, memory: EpisodicMemory, mcp_client=None, drift: bool = False, session_metrics: dict = None) -> Action:
+        # --- FEATURE: Text-Box Priority Mode (Dialogue Cruise Control) ---
+        ctx = obs.state.context
+        if ctx.get('is_dialogue'):
+            print("🗨️ Dialogue Cruise Control: Auto-advancing text...")
+            return Action(
+                button="a", 
+                duration=2, # High-speed tap
+                until_visual_change=True,
+                reasoning="Dialogue Cruise Control: Progressing text automatically via RAM flag."
+            )
+        # ------------------------------------------------------------------
+
         # 1. Try High-Confidence Manual Policy first (0 Token cost)
         policy_action = self.policy.get_action(obs, plan)
         if policy_action:

@@ -113,7 +113,15 @@ class AgenticBrain(Brain):
             return Action(button="none", duration=10, reasoning="Dead End Rollback: Resetting to Bootstrap state.")
 
         # 3. Handle Stagnation & Timeline Branching
-        if observation.guidance and "STAGNATION" in observation.guidance:
+        is_dialogue = ctx.get('is_dialogue', False)
+        
+        if is_dialogue:
+            # RESET stagnation during dialogue - we are progressing text!
+            self.stagnation_counter = 0
+            if observation.guidance:
+                observation.guidance = observation.guidance.replace("STAGNATION", "DIALOGUE_ACTIVE")
+        
+        if observation.guidance and "STAGNATION" in observation.guidance and not is_dialogue:
             self.stagnation_counter += 1
             
             if self.stagnation_counter == 10:
@@ -371,10 +379,12 @@ class AgenticBrain(Brain):
         reward_delta, is_stuck, critic_guidance, is_loop = self.critic.evaluate(self.memory, observation)
         self.memory.update_last_step(observation, is_stuck)
 
+        is_dialogue = ctx.get('is_dialogue', False)
+
         # --- FEATURE: Recursive Dead End Rollback ---
         # If this EXACT visual state has caused stagnation in 3+ separate sessions,
         # assume the current 'Frontier' save is a Dead End and rollback to Bootstrap.
-        if self.long_term_memory:
+        if self.long_term_memory and not is_dialogue:
             dead_end_count = self.long_term_memory.get_dead_end_count(observation.state_hash)
             if dead_end_count >= 3:
                 print(f"💀 DEAD END DETECTED: This state ({observation.state_hash}) has failed in {dead_end_count} sessions.")

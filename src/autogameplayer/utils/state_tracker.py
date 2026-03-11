@@ -13,20 +13,32 @@ class StateTracker:
     def get_hash(self, state: GameState) -> str:
         """Creates a stable fingerprint using a combination of vision, OCR, and context."""
         # 1. Vision Fingerprint (Rounded vector for spatial stability)
-        vision_part = np.round(state.vision_vector, self.precision).tolist()
+        # Increased precision to 3 for better visual differentiation
+        vision_part = np.round(state.vision_vector, 3).tolist()
         
         # 2. OCR Fingerprint (Normalized text)
         ocr_part = (state.ocr_text or "").strip().upper()
         
-        # 3. Spatial Context (Map and Coordinates)
+        # --- FEATURE: Dialogue Entropy ---
+        # If we are in a dialogue, the "State" must include the text content 
+        # to ensure every line of conversation has a unique hash.
         ctx = state.context
+        is_dialogue = ctx.get('is_dialogue', False)
+        dialogue_entropy = ""
+        if is_dialogue and ocr_part:
+            # Use the first 10 chars to uniquely identify the conversation step
+            dialogue_entropy = ocr_part[:10]
+        # ---------------------------------
+        
+        # 3. Spatial Context (Map and Coordinates)
         spatial_part = f"{ctx.get('map_id', 0)}_{ctx.get('x', 0)}_{ctx.get('y', 0)}"
         
         # Combine into a stable signature
         fingerprint = {
             "v": vision_part,
             "o": ocr_part,
-            "s": spatial_part
+            "s": spatial_part,
+            "d": dialogue_entropy # Unique per conversation line
         }
         
         return hashlib.md5(json.dumps(fingerprint, sort_keys=True).encode()).hexdigest()

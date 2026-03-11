@@ -46,6 +46,7 @@ ram:
     money_byte_2: 0xD348
     money_byte_3: 0xD349
     dialogue_index: 0xCD38
+    textbox_flag: 0xCD3D
     tile_under_player: 0xD360
 maps:
   0: "Intro/Naming Screen"
