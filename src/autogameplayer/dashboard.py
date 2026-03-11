@@ -140,7 +140,7 @@ def main():
             st.session_state.supported_buttons = caps.get('supported_buttons', [])
             st.rerun()
 
-    include_ocr = st.sidebar.checkbox("Enable OCR (Slow Path)", value=False)
+    include_ocr = st.sidebar.checkbox("Enable OCR (Slow Path)", value=False, key="sidebar_ocr_toggle")
 
     st.sidebar.header("🕹️ Controller")
     btns = st.session_state.supported_buttons
@@ -170,8 +170,8 @@ def main():
                 asyncio.run(call_mcp_tool(worker_port, "send_input", {"button": btn}))
 
     st.sidebar.header("💬 AI Guidance")
-    user_msg = st.sidebar.text_input("Instruction", placeholder="e.g. Go to the PokeCenter")
-    if st.sidebar.button("Send Guidance"):
+    user_msg = st.sidebar.text_input("Instruction", placeholder="e.g. Go to the PokeCenter", key="sidebar_guidance_input")
+    if st.sidebar.button("Send Guidance", key="sidebar_send_guidance_btn"):
         asyncio.run(call_mcp_tool(worker_port, "set_guidance", {"message": user_msg}))
 
     st.header("📺 Universal Game Nexus")
@@ -342,103 +342,113 @@ def main():
         except Exception: pass
 
     st.sidebar.divider()
-    view_map_id = st.sidebar.selectbox("🗺️ Select Grid View", options=list(map_list.keys()), format_func=lambda x: map_list[x])
+    view_map_id = st.sidebar.selectbox("🗺️ Select Grid View", options=list(map_list.keys()), format_func=lambda x: map_list[x], key="sidebar_map_selector")
 
-    # Update Loop
-    while True:
-        try:
-            state_json = asyncio.run(call_mcp_tool(worker_port, "get_game_state", {"include_ocr": include_ocr}))
-            
-            if "error" in state_json and len(state_json) < 500:
-                try:
-                    err_data = json.loads(state_json)
-                    if "error" in err_data:
-                        status_box.warning(f"Connecting to Game Server... ({err_data['error'][:30]})")
-                        time.sleep(1.0)
-                        continue
-                except Exception: pass
+    # Update Pass
+    try:
+        state_json = asyncio.run(call_mcp_tool(worker_port, "get_game_state", {"include_ocr": include_ocr}))
+        
+        if "error" in state_json and len(state_json) < 500:
+            try:
+                err_data = json.loads(state_json)
+                if "error" in err_data:
+                    status_box.warning(f"Connecting to Game Server... ({err_data['error'][:30]})")
+                    time.sleep(1.0)
+                    st.rerun()
+            except Exception: pass
 
-            state_data = GameState.model_validate_json(state_json)
-            
-            if state_data.last_action:
-                plan_text = f"🎯 **Plan:** {state_data.current_plan}\n\n" if state_data.current_plan else ""
-                repeat_suffix = f" (x{state_data.context.get('last_repeat', 1)})" if state_data.context.get('last_repeat', 1) > 1 else ""
-                reasoning = state_data.last_reasoning or "Thinking..."
-                action_info.info(f"{plan_text}🤖 **Action:** {state_data.last_action.upper()}{repeat_suffix}")
-                
-                # Update reasoning history
-                current_entry = {"Action": state_data.last_action.upper(), "Reasoning": reasoning}
-                if not st.session_state.reasoning_steps or st.session_state.reasoning_steps[-1] != current_entry:
-                    st.session_state.reasoning_steps.append(current_entry)
-                
-                reasoning_history_table.table(list(st.session_state.reasoning_steps)[::-1])
-            
-            if state_data.context:
-                ctx = state_data.context
-                ui_state = ctx.get('interface_mode', 'UNKNOWN')
-                curr_map_id = ctx.get('map_id', 0)
-                
-                curr_x, curr_y = ctx.get('x', 0), ctx.get('y', 0)
-                last_x, last_y = st.session_state.last_coords
-                
-                dx = curr_x - last_x
-                dy = curr_y - last_y
-                
-                # Collision Detection (Odometer)
-                last_btn = state_data.last_action.lower() if state_data.last_action else ""
-                collision = False
-                if last_btn == "up" and dy >= 0: collision = True
-                elif last_btn == "down" and dy <= 0: collision = True
-                elif last_btn == "left" and dx >= 0: collision = True
-                elif last_btn == "right" and dx <= 0: collision = True
-                
-                if last_btn not in ["up", "down", "left", "right"]: collision = False
-                if ui_state != "EXPLORABLE (Overworld)": collision = False
-                
-                dx_metric.metric("Delta X", dx, delta_color="normal" if not collision else "inverse")
-                dy_metric.metric("Delta Y", dy, delta_color="normal" if not collision else "inverse")
-                
-                if collision:
-                    collision_box.error(f"🚨 Collision at ({curr_x}, {curr_y})!")
-                else:
-                    collision_box.empty()
-                
-                st.session_state.last_coords = (curr_x, curr_y)
-                
-                s_text = f"**Map:** #{curr_map_id} | **X:** {curr_x} | **Y:** {curr_y}\n\n"
-                s_text += f"**HP:** {ctx.get('hp')} | **State:** {ui_state}"
-                status_box.write(s_text)
-                if include_ocr and state_data.ocr_text: ocr_box.info(f"**OCR:** {state_data.ocr_text}")
+        state_data = GameState.model_validate_json(state_json)
 
-                # Update RAG Retrieval Box
-                if state_data.recalled_memories:
-                    rag_text = "**Top Recalled Context:**\n\n"
-                    for mem in state_data.recalled_memories[:3]:
-                        rag_text += f"- {mem[:200]}...\n"
-                    rag_box.info(rag_text)
-                else:
-                    rag_box.write("Waiting for active knowledge retrieval...")
+        # --- UPDATE UI ELEMENTS (With Fallbacks to prevent shifting) ---
+        if state_data.last_action:
+            plan_text = f"🎯 **Plan:** {state_data.current_plan}\n\n" if state_data.current_plan else ""
+            repeat_suffix = f" (x{state_data.context.get('last_repeat', 1)})" if state_data.context.get('last_repeat', 1) > 1 else ""
+            reasoning = state_data.last_reasoning or "Thinking..."
+            action_info.info(f"{plan_text}🤖 **Action:** {state_data.last_action.upper()}{repeat_suffix}")
 
-                # Render SLAM Grid
-                grid_map_id = view_map_id if view_map_id is not None else curr_map_id
-                map_name = map_list.get(grid_map_id, f"Map #{grid_map_id}")
-                
-                # Only show player marker if on the viewed map
-                player_x = curr_x if grid_map_id == curr_map_id else -100
-                player_y = curr_y if grid_map_id == curr_map_id else -100
-                
-                grid_fig = render_spatial_grid(db_path, grid_map_id, player_x, player_y, map_name=map_name)
-                if grid_fig:
-                    grid_chart.plotly_chart(grid_fig, use_container_width=True, key="main_spatial_grid_plot")
-                else:
-                    grid_chart.info(f"No exploration data for {map_name}.")
-            
-            if state_data.vision_vector:
-                vector_chart.line_chart(state_data.vision_vector)
-            
-        except Exception as e:
-            status_box.warning(f"Searching for Game Server... ({str(e)[:50]})")
-        time.sleep(0.5)
+            # Update reasoning history
+            current_entry = {"Action": state_data.last_action.upper(), "Reasoning": reasoning}
+            if not st.session_state.reasoning_steps or st.session_state.reasoning_steps[-1] != current_entry:
+                st.session_state.reasoning_steps.append(current_entry)
+
+            reasoning_history_table.table(list(st.session_state.reasoning_steps)[::-1])
+        else:
+            action_info.write("⏳ Waiting for AI to take action...")
+
+        if state_data.context:
+            ctx = state_data.context
+            ui_state = ctx.get('interface_mode', 'UNKNOWN')
+            curr_map_id = ctx.get('map_id', 0)
+
+            curr_x, curr_y = ctx.get('x', 0), ctx.get('y', 0)
+            last_x, last_y = st.session_state.last_coords
+
+            dx = curr_x - last_x
+            dy = curr_y - last_y
+
+            # Collision Detection (Odometer)
+            last_btn = state_data.last_action.lower() if state_data.last_action else ""
+            collision = False
+            if last_btn == "up" and dy >= 0: collision = True
+            elif last_btn == "down" and dy <= 0: collision = True
+            elif last_btn == "left" and dx >= 0: collision = True
+            elif last_btn == "right" and dx <= 0: collision = True
+
+            if last_btn not in ["up", "down", "left", "right"]: collision = False
+            if ui_state != "EXPLORABLE (Overworld)": collision = False
+
+            dx_metric.metric("Delta X", dx, delta_color="normal" if not collision else "inverse")
+            dy_metric.metric("Delta Y", dy, delta_color="normal" if not collision else "inverse")
+
+            if collision:
+                collision_box.error(f"🚨 Collision at ({curr_x}, {curr_y})!")
+            else:
+                collision_box.empty()
+
+            st.session_state.last_coords = (curr_x, curr_y)
+
+            s_text = f"**Map:** #{curr_map_id} | **X:** {curr_x} | **Y:** {curr_y}\n\n"
+            s_text += f"**HP:** {ctx.get('hp')} | **State:** {ui_state}"
+            status_box.write(s_text)
+
+            if include_ocr and state_data.ocr_text:
+                ocr_box.info(f"**OCR:** {state_data.ocr_text}")
+            else:
+                ocr_box.write("🗨️ No dialogue text detected.")
+
+            # Update RAG Retrieval Box
+            if state_data.recalled_memories:
+                rag_text = "**Top Recalled Context:**\n\n"
+                for mem in state_data.recalled_memories[:3]:
+                    rag_text += f"- {mem[:200]}...\n"
+                rag_box.info(rag_text)
+            else:
+                rag_box.write("📖 Waiting for active knowledge retrieval...")
+
+            # Render SLAM Grid
+            grid_map_id = view_map_id if view_map_id is not None else curr_map_id
+            map_name = map_list.get(grid_map_id, f"Map #{grid_map_id}")
+
+            # Only show player marker if on the viewed map
+            player_x = curr_x if grid_map_id == curr_map_id else -100
+            player_y = curr_y if grid_map_id == curr_map_id else -100
+
+            grid_fig = render_spatial_grid(db_path, grid_map_id, player_x, player_y, map_name=map_name)
+            if grid_fig:
+                grid_chart.plotly_chart(grid_fig, use_container_width=True, key="live_exploration_heatmap")
+            else:
+                grid_chart.info(f"No exploration data for {map_name}.")
+
+        if state_data.vision_vector:
+            vector_chart.line_chart(state_data.vision_vector)
+        else:
+            vector_chart.write("📊 Vision Encoder disabled or warming up...")        
+    except Exception as e:
+        status_box.warning(f"Searching for Game Server... ({str(e)[:50]})")
+    
+    # Schedule next update
+    time.sleep(0.5)
+    st.rerun()
 
 if __name__ == "__main__":
     main()
