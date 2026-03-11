@@ -26,6 +26,8 @@ class GameProfile(BaseModel):
     intro_guidance: str = ""
     known_locations: List[str] = []
     maps: Dict[int, str] = {}
+    controller_type: str = "gb"  # e.g. "gb", "gba", "nes"
+    memory_map_hints: str = ""   # Textual description of RAM addresses for the LLM
 
 class GameHeuristics(BaseModel):
     """Game-specific heuristics for AI logic."""

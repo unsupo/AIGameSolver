@@ -8,9 +8,10 @@ from autogameplayer.core.config_loader import discover_roms
 
 class Orchestrator:
     """Manages mass parallelism across workers."""
-    def __init__(self, num_workers: int, rom_path: str):
+    def __init__(self, num_workers: int, rom_path: str, config: GameConfig = None):
         self.num_workers = num_workers
         self.rom_path = rom_path
+        self.config = config
 
     def evaluate_population(self, genomes: List[np.ndarray], steps_per_episode: int = 100, target_checkpoint=None, initial_slot: int = 0) -> List[dict]:
         population_size = len(genomes)
@@ -21,8 +22,8 @@ class Orchestrator:
             try:
                 futures = []
                 for i, genome in enumerate(genomes):
-                    # Pass initial_slot to each worker
-                    futures.append(executor.submit(run_worker_episode, i, self.rom_path, steps_per_episode, genome, target_checkpoint, initial_slot))
+                    # Pass initial_slot and config to each worker
+                    futures.append(executor.submit(run_worker_episode, i, self.rom_path, steps_per_episode, genome, target_checkpoint, initial_slot, self.config))
                 for i, future in enumerate(concurrent.futures.as_completed(futures)):
                     try:
                         res = future.result()

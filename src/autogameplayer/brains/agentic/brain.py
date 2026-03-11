@@ -127,7 +127,7 @@ class AgenticBrain(Brain):
                 self.drift_steps = 3 
 
             if self.stagnation_counter >= 30:
-                rollback_slot = 1 
+                rollback_slot = settings.tas_trigger_slot 
                 if self.last_rolling_save_step > 0:
                     print(f"🚨 CRITICAL STAGNATION ({self.stagnation_counter}): Branching timeline. Rolling back to Slot {rollback_slot}...")
                 
@@ -229,9 +229,6 @@ class AgenticBrain(Brain):
                     return action
 
             try:
-                goal_str = self.current_plan.get('goal', 'Unknown')
-                print(f"⏳ Actor: Deciding action for goal: '{goal_str}'{' (DRIFTING 🌪️)' if self.drift_steps > 0 else ''}")
-                
                 session_metrics = {
                     "total_steps": self.step_count,
                     "maps_discovered": self.maps_discovered,
@@ -249,11 +246,43 @@ class AgenticBrain(Brain):
                 )
 
                 if action.target_coords:
+                    goal_str = self.current_plan.get('goal', 'Unknown')
+                    print(f"⏳ Actor: Deciding path for goal: '{goal_str}'")
                     start_pos = (ctx.get('x', 0), ctx.get('y', 0))
                     path = self.pathfinder.find_path(map_id, start_pos, action.target_coords)
                     if path:
                         print(f"📍 Pathfinder: Found path to {action.target_coords} ({len(path)} steps).")
                         macro_actions = [Action(button=btn, duration=10, until_visual_change=True) for btn in path]
+                        
+                        # FEATURE: Macro Synthesis (Pathfinding to Skill)
+                        if self.optimizer:
+                            skill_name = f"SKILL_PATH_TO_{action.target_coords[0]}_{action.target_coords[1]}"
+                            skill_desc = f"Pathfinder sequence from {start_pos} to {action.target_coords} on Map {map_id}."
+                            
+                            # Convert Action list to simple dict sequence for optimizer
+                            macro_json = [{"button": m.button, "frames": m.duration} for m in macro_actions]
+                            
+                            # Save as a highly reliable skill since it's calculated from real SLAM data
+                            self.optimizer.save_macro(
+                                vision_vector=observation.state.vision_vector,
+                                sequence=macro_json,
+                                map_id=map_id,
+                                coords=start_pos,
+                                description=skill_desc,
+                                score=5.0, # High initial score
+                                vision_hash=observation.state_hash
+                            )
+                            # Explicitly name it for re-use
+                            try:
+                                import sqlite3
+                                with sqlite3.connect(str(self.optimizer.db_path), timeout=10) as conn:
+                                    conn.execute(
+                                        "UPDATE skills SET name = ?, reliability = 0.9 WHERE vision_hash = ? AND map_id = ?",
+                                        (skill_name, observation.state_hash, map_id)
+                                    )
+                                    conn.commit()
+                            except Exception: pass
+
                         action = Action(
                             macro=macro_actions,
                             reasoning=f"Pathfinding to {action.target_coords} | {action.reasoning}"
@@ -331,7 +360,9 @@ class AgenticBrain(Brain):
             task.add_done_callback(self._tasks.discard)
         
         # --- FEATURE: Odometer (Move Validation) ---
-        if self.last_action_obj and self.last_button in ["up", "down", "left", "right"]:
+        is_explorable = "EXPLORABLE" in ctx.get('interface_mode', '')
+        
+        if is_explorable and self.last_action_obj and self.last_button in ["up", "down", "left", "right"]:
             steps = self.last_action_obj.repeat
             ex, ey = self.last_pos
             if self.last_button == "up":
@@ -453,14 +484,14 @@ class AgenticBrain(Brain):
             if not is_intro_sequence:
                 if self.last_map_id in intro_maps and map_id not in intro_maps and self.last_map_id != -1:
                     if mcp_client:
-                        print("🎉 INTRO CLEARED: Saving Bootstrap Checkpoint to Slot 0...")
-                        asyncio.create_task(mcp_client.call_tool("manage_checkpoint", {"action": "save", "slot": 0}))
+                        print(f"🎉 INTRO CLEARED: Saving Bootstrap Checkpoint to Slot {settings.bootstrap_slot}...")
+                        asyncio.create_task(mcp_client.call_tool("manage_checkpoint", {"action": "save", "slot": settings.bootstrap_slot}))
                 
                 if map_id != self.last_map_id:
                     self.maps_discovered += 1
-                    print(f"✨ New Area Discovered: Map #{map_id}. Saving 'Gold' state to Slot 0.")
+                    print(f"✨ New Area Discovered: Map #{map_id}. Saving 'Gold' state to Slot {settings.bootstrap_slot}.")
                     if mcp_client:
-                        asyncio.create_task(mcp_client.call_tool("manage_checkpoint", {"action": "save", "slot": 0}))
+                        asyncio.create_task(mcp_client.call_tool("manage_checkpoint", {"action": "save", "slot": settings.bootstrap_slot}))
                     
                     asyncio.create_task(self.reflector.analyze_session(self.session_id, self.long_term_memory, limit=50))
 
@@ -474,8 +505,8 @@ class AgenticBrain(Brain):
                     self.last_success_step = self.step_count
                     self.last_save_step = self.step_count
                     if mcp_client:
-                        print("💾 Milestone Achieved: Auto-Saving state to Slot 1...")
-                        asyncio.create_task(mcp_client.call_tool("manage_checkpoint", {"action": "save", "slot": 1}))
+                        print(f"💾 Milestone Achieved: Auto-Saving state to Slot {settings.tas_trigger_slot}...")
+                        asyncio.create_task(mcp_client.call_tool("manage_checkpoint", {"action": "save", "slot": settings.tas_trigger_slot}))
 
     def _get_session_metrics(self) -> dict:
         return {

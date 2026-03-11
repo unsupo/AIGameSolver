@@ -3,6 +3,7 @@ import uuid
 from autogameplayer.core.interfaces import Brain
 from autogameplayer.core.environment import EmulatorEnvironment
 from autogameplayer.core.replay import DatasetLogger
+from autogameplayer.core.config import settings
 
 class GameRunner:
     """Orchestrates the agnostic loop and optionally logs data."""
@@ -102,8 +103,8 @@ class GameRunner:
                         print("🧹 Cleared Episodic Memory for new area.")
 
                     # 2. Bootstrap Save
-                    print("💾 Saving Best-So-Far Bootstrap to Slot 0...")
-                    await self.env.client.call_tool("manage_checkpoint", {"action": "save", "slot": 0})
+                    print(f"💾 Saving Best-So-Far Bootstrap to Slot {settings.bootstrap_slot}...")
+                    await self.env.client.call_tool("manage_checkpoint", {"action": "save", "slot": settings.bootstrap_slot})
 
                     # 3. FEATURE: Branching Evaluation (Optimal Route Search)
                     if not i >= steps: # Only if session has significant remaining steps

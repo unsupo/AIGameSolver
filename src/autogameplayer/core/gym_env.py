@@ -7,8 +7,10 @@ import os
 from autogameplayer.core.mcp_client import MCPClient
 from autogameplayer.core.environment import EmulatorEnvironment
 from autogameplayer.core.models import Action
+from autogameplayer.core.config import settings
 from autogameplayer.core.config_loader import load_game_config
 from autogameplayer.core.registry import Registry
+from autogameplayer.vision.encoder import VisionEncoder
 from autogameplayer.utils.launcher import ServerLauncher
 from autogameplayer.utils.process import get_base_env
 
@@ -33,8 +35,11 @@ class UniversalRLWrapper(gym.Env):
         self.controller = Registry.create_controller(self.config.controller)
         self.buttons = self.controller.buttons
         
+        # Dynamic vision dimension based on model
+        v_dim = VisionEncoder.get_dim(settings.vision_model)
+        
         self.action_space = spaces.Discrete(len(self.buttons))
-        self.observation_space = spaces.Box(low=-10.0, high=10.0, shape=(384,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-10.0, high=10.0, shape=(v_dim,), dtype=np.float32)
         
         self.launcher = ServerLauncher(self.rom_path, self.port)
         self.client = None
@@ -66,9 +71,9 @@ class UniversalRLWrapper(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         
-        # Attempt to load bootstrap state 0 if exists
+        # Attempt to load bootstrap state
         try:
-            self.loop.run_until_complete(self.client.call_tool("manage_checkpoint", {"action": "load", "slot": 0}))
+            self.loop.run_until_complete(self.client.call_tool("manage_checkpoint", {"action": "load", "slot": settings.bootstrap_slot}))
         except Exception:
             pass
         

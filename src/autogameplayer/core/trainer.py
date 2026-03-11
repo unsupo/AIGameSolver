@@ -29,12 +29,18 @@ class GeneticTrainer:
         num_buttons = len(controller.buttons)
         if num_buttons == 0:
             # Fallback if dynamic controller hasn't synced yet
-            num_buttons = 10 if self.rom_path.lower().endswith(".gba") else 8
+            controller_name = "gb"
+            if self.config.profile:
+                controller_name = self.config.profile.controller_type
+            elif self.rom_path.lower().endswith(".gba"):
+                controller_name = "gba"
+            
+            num_buttons = 10 if controller_name == "gba" else 8
             
         genome_shape = (384, num_buttons)
         
         self.pop_manager = PopulationManager(population_size, genome_shape)
-        self.orchestrator = Orchestrator(num_workers, self.rom_path)
+        self.orchestrator = Orchestrator(num_workers, self.rom_path, config=self.config)
         self.metrics_path = settings.base_dir / "logs" / "metrics" / "evolution_stats.json"
         self.history = []
         
@@ -62,9 +68,9 @@ class GeneticTrainer:
             
             # Load initial state
             try:
-                await client.call_tool("manage_checkpoint", {"action": "load", "slot": 0})
+                await client.call_tool("manage_checkpoint", {"action": "load", "slot": settings.bootstrap_slot})
             except Exception as e:
-                logging.debug(f"No initial state found in slot 0: {e}")
+                logging.debug(f"No initial state found in slot {settings.bootstrap_slot}: {e}")
             
             # Check milestones
             for target in self.curriculum.checkpoints:
@@ -130,12 +136,12 @@ class GeneticTrainer:
             # ADVANCE CURRICULUM if threshold met
             if target and success_rate >= self.success_threshold:
                 print(f"✨ MILESTONE REACHED! {success_count} individuals achieved '{target.name}'.")
-                # Move the 'winning' state from slot 99 to slot 0 (global start)
-                state_99 = settings.base_dir / "state_slot_99.state"
-                state_0 = settings.base_dir / "state_slot_0.state"
-                if os.path.exists(state_99):
-                    shutil.copy(state_99, state_0)
-                    print("💾 Advancing starting line to the new checkpoint.")
+                # Move the 'winning' state from milestone slot to bootstrap slot
+                state_milestone = settings.base_dir / f"state_slot_{settings.milestone_tmp_slot}.state"
+                state_bootstrap = settings.base_dir / f"state_slot_{settings.bootstrap_slot}.state"
+                if os.path.exists(state_milestone):
+                    shutil.copy(state_milestone, state_bootstrap)
+                    print(f"💾 Advancing starting line to the new checkpoint (Slot {settings.bootstrap_slot}).")
                 
                 self.curriculum.advance()
                 if self.curriculum.is_complete():

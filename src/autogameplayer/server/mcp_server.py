@@ -16,11 +16,26 @@ import time
 from typing import Set, Optional
 
 class MemoryDetective:
-    def __init__(self, start_addr: int = 0xC000, end_addr: int = 0xE000):
+    def __init__(self, start_addr: int = None, end_addr: int = None):
+        # Ranges are initialized by update_range_for_platform or provided directly
         self.start_addr = start_addr
         self.end_addr = end_addr
         self.last_snapshot = bytearray()
-        self.search_results: Set[int] = set(range(start_addr, end_addr))
+        self.search_results: Set[int] = set()
+        
+        if self.start_addr is not None and self.end_addr is not None:
+            self.search_results = set(range(self.start_addr, self.end_addr))
+
+    def update_range_for_platform(self, emulator_name: str):
+        """Adjusts detection range based on whether we are playing GB or GBA."""
+        if "gba" in emulator_name.lower():
+            self.start_addr, self.end_addr = settings.gba_memory_range
+        else:
+            self.start_addr, self.end_addr = settings.gb_memory_range
+        
+        self.search_results = set(range(self.start_addr, self.end_addr))
+        self.last_snapshot = bytearray()
+        print(f"🔍 MemoryDetective: Range set to {hex(self.start_addr)}-{hex(self.end_addr)} for {emulator_name}")
 
     def take_snapshot(self, emulator):
         """Grabs the current state of the RAM."""
@@ -57,6 +72,9 @@ def create_server(rom_path: str, vision_encoder: VisionEncoder = None, port: int
     mcp = FastMCP("Universal Game Nexus")
     session = GameSession(rom_path, vision_encoder=vision_encoder, config=config)
     detective = MemoryDetective()
+    
+    # Auto-adjust memory range based on core
+    detective.update_range_for_platform(session.emulator.emulator_name)
     
     # Start the WebSocket server for frame streaming
     ws_server = WebSocketServer(session, port)
@@ -172,14 +190,14 @@ def create_server(rom_path: str, vision_encoder: VisionEncoder = None, port: int
         if action == "load":
             session.last_load_slot = slot
             # Automatically start recording when loading a known-good milestone state
-            if slot == 1:
+            if slot == settings.tas_trigger_slot:
                 session.recording.start(session.total_ticks)
                 print(f"🎬 TAS: Auto-started recording from Slot {slot}")
         elif action == "save":
             # Automatically stop and save recording when achieving a new milestone
-            if slot == 1 and session.recording.is_recording:
+            if slot == settings.tas_trigger_slot and session.recording.is_recording:
                 filename = f"milestone_tas_{int(time.time())}.json"
-                start_slot = getattr(session, 'last_load_slot', 1)
+                start_slot = getattr(session, 'last_load_slot', settings.tas_trigger_slot)
                 path = session.recording.stop(
                     os.path.basename(session.rom_path), 
                     filename,

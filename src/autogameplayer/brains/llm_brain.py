@@ -1,14 +1,14 @@
 import random
+import asyncio
+import time
 from autogameplayer.core.interfaces import Brain, Controller
 from autogameplayer.core.models import Observation, Action
 from autogameplayer.core.config import settings
 from autogameplayer.core.config_loader import GameConfig
-from autogameplayer.utils.llm import LLMClientProtocol, OllamaBootstrap
-from autogameplayer.utils.llm_utils import extract_json_from_llm_response
+from autogameplayer.utils.llm import LLMClientProtocol, OllamaBootstrap, extract_json_from_llm_response
 from autogameplayer.core.registry import Registry
 
 from autogameplayer.core.optimizer import StrategyOptimizer
-from autogameplayer.brains.agentic.memory import LongTermMemory
 from autogameplayer.core.knowledge import KnowledgeBase
 from autogameplayer.brains.agentic.reflector import ReflectionAgent
 
@@ -156,7 +156,7 @@ class LLMBrain(Brain):
         TOOLS AVAILABLE:
         - scan_memory: Read a RAM address. Use to check player HP, badge count, map progress.
         - save_state / load_state: Save your progress (use after clearing a room or before a risky action).
-          Save slot 0 = bootstrap (don't overwrite). Use slots 2-9 for branching exploration.
+          Save slot {settings.bootstrap_slot} = bootstrap (don't overwrite). Use slots {settings.rolling_save_start}-{settings.rolling_save_end} for branching exploration.
 
         KEY POKEMON RED ADDRESSES:
         - 0xD35E = Current Map ID

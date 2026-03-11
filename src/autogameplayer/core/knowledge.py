@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List
 from autogameplayer.core.config import settings
 from autogameplayer.utils.llm import LLMClientProtocol
+from autogameplayer.utils.vector import cosine_similarity
 
 class KnowledgeBase:
     """A RAG system for external game knowledge (walkthroughs, wikis)."""
@@ -76,7 +77,7 @@ class KnowledgeBase:
                     content, emb_bytes = row
                     if emb_bytes:
                         m_emb = np.frombuffer(emb_bytes, dtype=np.float32)
-                        sim = np.dot(query_embedding, m_emb) / (np.linalg.norm(query_embedding) * np.linalg.norm(m_emb))
+                        sim = cosine_similarity(query_embedding, m_emb)
                         results.append((sim, content))
             
             results.sort(key=lambda x: x[0], reverse=True)

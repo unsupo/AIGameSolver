@@ -54,10 +54,10 @@ class ObservationPipeline:
         return False
 
     def process(self, emulator: BaseEmulator, include_ocr: bool = False) -> GameState:
-        # 1. Capture Raw Frame
+        # 1. Capture Raw Frame (This usually steps the emulator)
         screenshot = emulator.get_screenshot()
-        
-        # 2. Extract Memory Context
+
+        # 2. Extract Memory Context (Now synchronized with the frame)
         context = self.context_extractor.extract(emulator) if self.context_extractor else {}
         
         if hasattr(self.context_extractor, 'config') and self.context_extractor.config.heuristics:

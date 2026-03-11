@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from autogameplayer.core.config import settings
 from autogameplayer.core.models import Observation, Action
 from autogameplayer.utils.llm import LLMClientProtocol
+from autogameplayer.utils.vector import cosine_similarity
 from autogameplayer.utils.database import ensure_ltm_schema, self_healing_db, get_db_connection, database_write
 
 class StepRecord(BaseModel):
@@ -223,7 +224,7 @@ class LongTermMemory:
                     if row['vision_vector']:
                         m_vec = np.frombuffer(row['vision_vector'], dtype=np.float32)
                         if len(m_vec) == len(q_vec):
-                            sim = np.dot(q_vec, m_vec) / (np.linalg.norm(q_vec) * np.linalg.norm(m_vec))
+                            sim = cosine_similarity(q_vec, m_vec)
                             if sim > threshold:
                                 return {
                                     "button": row['button'],
@@ -405,7 +406,7 @@ class LongTermMemory:
                     m_meta = json.loads(m_meta_json)
                     if m_emb_bytes:
                         m_emb = np.frombuffer(m_emb_bytes, dtype=np.float32)
-                        sim = np.dot(query_embedding, m_emb) / (np.linalg.norm(query_embedding) * np.linalg.norm(m_emb))
+                        sim = cosine_similarity(query_embedding, m_emb)
                         sim += random.uniform(-0.05, 0.05)
                         if current_map_id is not None and m_meta.get("map_id") == current_map_id:
                             sim += 0.2
@@ -436,7 +437,7 @@ class LongTermMemory:
                     v_vec = m_meta.get("vision_vector")
                     if v_vec:
                         m_vec = np.array(v_vec)
-                        sim = np.dot(q_vec, m_vec) / (np.linalg.norm(q_vec) * np.linalg.norm(m_vec))
+                        sim = cosine_similarity(q_vec, m_vec)
                         results.append((sim, m_text))
             
             results.sort(key=lambda x: x[0], reverse=True)

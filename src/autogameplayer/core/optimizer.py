@@ -8,6 +8,8 @@ from autogameplayer.core.config import settings
 
 from autogameplayer.utils.llm import LLMClientProtocol
 
+from autogameplayer.utils.vector import cosine_similarity
+from autogameplayer.utils.timing import frames_to_seconds
 from autogameplayer.utils.database import ensure_ltm_schema, get_db_connection, database_write
 
 class StrategyOptimizer:
@@ -104,13 +106,10 @@ class StrategyOptimizer:
                         sid, v_blob, old_score = row['id'], row['vision_vector'], row['score']
                         if v_blob:
                             m_vec = np.frombuffer(v_blob, dtype=np.float32)
-                            norm_q = np.linalg.norm(q_vec)
-                            norm_m = np.linalg.norm(m_vec)
-                            if norm_q > 0 and norm_m > 0:
-                                sim = np.dot(q_vec, m_vec) / (norm_q * norm_m)
-                                if sim > 0.98:
-                                    best_match_id = sid
-                                    break
+                            sim = cosine_similarity(q_vec, m_vec)
+                            if sim > 0.98:
+                                best_match_id = sid
+                                break
             except Exception: pass
 
         try:
@@ -159,12 +158,9 @@ class StrategyOptimizer:
                     is_match = False
                     if v_blob:
                         m_vec = np.frombuffer(v_blob, dtype=np.float32)
-                        norm_q = np.linalg.norm(q_vec)
-                        norm_m = np.linalg.norm(m_vec)
-                        if norm_q > 0 and norm_m > 0:
-                            sim = np.dot(q_vec, m_vec) / (norm_q * norm_m)
-                            if sim > 0.95:
-                                is_match = True
+                        sim = cosine_similarity(q_vec, m_vec)
+                        if sim > 0.95:
+                            is_match = True
                     elif row['map_id'] == -1:
                         # For global agnostic skills without vision vectors, 
                         # we rely on the Brain to report success/failure of the skill it just ran by name.
@@ -244,11 +240,9 @@ class StrategyOptimizer:
                     # Case A: Visual Match (Primary)
                     if is_vision_active and v_blob:
                         m_vec = np.frombuffer(v_blob, dtype=np.float32)
-                        m_norm = np.linalg.norm(m_vec)
-                        if m_norm > 0:
-                            sim = np.dot(q_vec, m_vec) / (q_norm * m_norm)
-                            if sim > threshold:
-                                is_match = True
+                        sim = cosine_similarity(q_vec, m_vec)
+                        if sim > threshold:
+                            is_match = True
                     
                     # Case B: Hash Match (Fallback for exact same screen or disabled vision)
                     if not is_match and vision_hash and row['vision_hash'] == vision_hash:
@@ -307,19 +301,16 @@ class StrategyOptimizer:
                     sid, v_blob, reliability, times_run = row['id'], row['vision_vector'], row['reliability'], row['times_run']
                     if v_blob:
                         m_vec = np.frombuffer(v_blob, dtype=np.float32)
-                        norm_q = np.linalg.norm(q_vec)
-                        norm_m = np.linalg.norm(m_vec)
-                        if norm_q > 0 and norm_m > 0:
-                            sim = np.dot(q_vec, m_vec) / (norm_q * norm_m)
-                            if sim > 0.95:
-                                # MULTIPLICATIVE DECAY: Proven skills decay slower than new ones
-                                new_reliability = reliability * 0.9
-                                
-                                if new_reliability < 0.2 and times_run > 3:
-                                    print(f"🗑️ Purging failed macro {sid} (Reliability dropped too low).")
-                                    conn.execute("DELETE FROM skills WHERE id = ?", (sid,))
-                                else:
-                                    conn.execute("UPDATE skills SET reliability = ? WHERE id = ?", (new_reliability, sid))
+                        sim = cosine_similarity(q_vec, m_vec)
+                        if sim > 0.95:
+                            # MULTIPLICATIVE DECAY
+                            new_reliability = reliability * 0.9
+                            
+                            if new_reliability < 0.2 and times_run > 3:
+                                print(f"🗑️ Purging failed macro {sid} (Reliability dropped too low).")
+                                conn.execute("DELETE FROM skills WHERE id = ?", (sid,))
+                            else:
+                                conn.execute("UPDATE skills SET reliability = ? WHERE id = ?", (new_reliability, sid))
                                 conn.commit()
                                 break
         except Exception as e:
@@ -354,20 +345,18 @@ class StrategyOptimizer:
                     sid, v_blob, old_macro_json = row['id'], row['vision_vector'], row['macro_json']
                     if v_blob:
                         m_vec = np.frombuffer(v_blob, dtype=np.float32)
-                        norm_q = np.linalg.norm(q_vec)
-                        norm_m = np.linalg.norm(m_vec)
-                        if norm_q > 0 and norm_m > 0:
-                            sim = np.dot(q_vec, m_vec) / (norm_q * norm_m)
-                            if sim > 0.98:
-                                try:
-                                    old_seq = json.loads(old_macro_json)
-                                    # If the new sequence is shorter (more efficient)
-                                    if len(new_sequence) < len(old_seq):
-                                        print(f"📈 Evolving macro {sid}: Compressed from {len(old_seq)} to {len(new_sequence)} steps.")
-                                        conn.execute("UPDATE skills SET macro_json = ? WHERE id = ?", (json.dumps(new_sequence), sid))
-                                        conn.commit()
-                                except (json.JSONDecodeError, TypeError): pass
-                                break
+                        sim = cosine_similarity(q_vec, m_vec)
+                        if sim > 0.98:
+                            try:
+                                old_seq = json.loads(old_macro_json)
+                                # If the new sequence is shorter (more efficient)
+                                if len(new_sequence) < len(old_seq):
+                                    print(f"📈 Evolving macro {sid}: Compressed from {len(old_seq)} to {len(new_sequence)} steps.")
+                                    conn.execute("UPDATE skills SET macro_json = ? WHERE id = ?", (json.dumps(new_sequence), sid))
+                                    conn.commit()
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                            break
         except Exception: pass
 
     def _is_high_entropy(self, macro_json: str) -> bool:
@@ -477,10 +466,8 @@ class StrategyOptimizer:
                         vec_j = np.frombuffer(all_skills[j]['vision_vector'], dtype=np.float32) if all_skills[j]['vision_vector'] else None
                         if vec_j is None: continue
                         
-                        norm_i = np.linalg.norm(vec_i)
-                        norm_j = np.linalg.norm(vec_j)
-                        if norm_i > 0 and norm_j > 0:
-                            sim = np.dot(vec_i, vec_j) / (norm_i * norm_j)
+                        if True:
+                            sim = cosine_similarity(vec_i, vec_j)
                             
                             if sim > threshold:
                                 # Keep the one with better reliability * score
@@ -586,8 +573,7 @@ class StrategyOptimizer:
                     total_frames = sum(5 for _ in btns) 
                     
                     # Reward Speed Scoring
-                    score = (freq * mean_r) / (total_frames / 60.0) 
-                    
+                    score = (freq * mean_r) / frames_to_seconds(total_frames)
                     if score > 5.0: 
                         scored.append({
                             "btns": btns,

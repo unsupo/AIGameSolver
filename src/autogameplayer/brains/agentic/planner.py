@@ -1,7 +1,7 @@
 import random
 from autogameplayer.core.models import Observation
 from autogameplayer.core.config_loader import GameConfig
-from autogameplayer.utils.llm import LLMClientProtocol
+from autogameplayer.utils.llm import LLMClientProtocol, extract_json_from_llm_response
 from .memory import LongTermMemory
 
 class PlannerAgent:
@@ -20,153 +20,120 @@ class PlannerAgent:
         map_id = ctx.get('map_id', -1)
         pos = (ctx.get('x'), ctx.get('y'))
         
-        # Get Map Name from config
-        map_name = "Unknown Area"
-        if self.config and self.config.profile and map_id in self.config.profile.maps:
-            map_name = self.config.profile.maps[map_id]
+        map_name = self._get_map_name(map_id)
+        recalled, recalled_text = await self._query_memory(obs, long_term, map_id, map_name, pos)
+        knowledge_context = await self._query_knowledge(map_id, map_name, pos)
         
-        # --- FEATURE: Milestone Injection ---
-        # Inject global milestones so the AI knows what it has already accomplished
-        completed_milestones = ""
-        if self.critic and self.critic.milestones:
-            completed_milestones = "\nCOMPLETED GLOBAL OBJECTIVES:\n- " + "\n- ".join(list(self.critic.milestones))
-        # ------------------------------------
+        dialogue_context = self._get_dialogue_context(obs, ctx)
+        stagnation_context = self._get_stagnation_context(map_id, pos, long_term)
+        curiosity_context = self._get_curiosity_context(recalled_text, stagnation_context)
+        skill_context = self.optimizer.get_skills_for_map(map_id) if self.optimizer else ""
+        
+        prompt = self._build_prompt(
+            obs, map_id, map_name, pos, 
+            recalled_text, knowledge_context, 
+            dialogue_context, stagnation_context, 
+            curiosity_context, skill_context
+        )
+        
+        plan_data = await self._execute_llm_plan(prompt, dialogue_context != "")
+        return plan_data, recalled
 
-        # 1. Query RAG for knowledge base insights (README, guides)
-        external_context = ""
-        recalled = []
-        if self.knowledge:
-            knowledge_snippets = await self.knowledge.query(f"What should I do on Map {map_id} ({map_name}) near {pos}?")
-            recalled.extend(knowledge_snippets)
-            if knowledge_snippets:
-                external_context = "\nEXTRACTED KNOWLEDGE:\n" + "\n".join(f"- {s}" for s in knowledge_snippets)
+    def _get_map_name(self, map_id):
+        if self.config and self.config.profile and map_id in self.config.profile.maps:
+            return self.config.profile.maps[map_id]
+        return "Unknown Area"
 
-        # 2. Query RAG for specific situational failures/rules
+    async def _query_memory(self, obs, long_term, map_id, map_name, pos):
         query = f"Strategies for Map {map_id} ({map_name}) at position {pos}"
-        specific_memories = await long_term.query(query, current_map_id=map_id if isinstance(map_id, int) else None)
-        recalled.extend(specific_memories)
-        recalled_text = "\n".join(f"- {m}" for m in specific_memories) if specific_memories else "No specific knowledge recalled."
-
-        # NEW: Check specifically for LOOP WARNINGS for this exact state hash
+        memories = await long_term.query(query, current_map_id=map_id if isinstance(map_id, int) else None)
+        
         loop_context = ""
-        for mem in specific_memories:
+        for mem in memories:
             if "Loop Detected" in mem and obs.state_hash in mem:
-                loop_context = "\n🚨 LOOP AVOIDANCE ACTIVE: You have been in a loop on this exact screen before. PURPOSEFULLY DEVIATE from your previous actions. Try random buttons or a completely different direction."
+                loop_context = "\n🚨 LOOP AVOIDANCE ACTIVE: Purposefully DEVIATE from previous actions."
                 break
+        
+        recalled_text = "\n".join(f"- {m}" for m in memories) if memories else "No specific knowledge recalled."
+        if loop_context:
+            recalled_text += loop_context
+            
+        return memories, recalled_text
 
-        # 3. Global Spatial Awareness (World Map)
-        exploration_summary = ""
-        if isinstance(map_id, int):
-            exploration_summary = f"\nWORLD MAP (Map {map_id} [{map_name}]):\\n{long_term.get_explored_summary(map_id)}"
+    async def _query_knowledge(self, map_id, map_name, pos):
+        if not self.knowledge:
+            return ""
+        snippets = await self.knowledge.query(f"What should I do on Map {map_id} ({map_name}) near {pos}?")
+        if snippets:
+            return "\nEXTRACTED KNOWLEDGE:\n" + "\n".join(f"- {s}" for s in snippets)
+        return ""
 
-        # NEW: Dialogue Busy Context
-        dialogue_busy_context = ""
+    def _get_dialogue_context(self, obs, ctx):
         ocr_upper = (obs.state.ocr_text or "").upper()
         naming_keywords = ["UPPER CASE", "LOWER CASE", "ED IT", "DELETE", " NAME "]
         is_naming = any(k in ocr_upper for k in naming_keywords)
-        if obs.state.has_dialogue_arrow or is_naming:
-            dialogue_busy_context = "\n⚠️ DIALOGUE/UI BUSY: The game is waiting for input to advance text or a name. Prioritize 'A' or 'START' actions. Avoid exploration goals until this is cleared."
-
-        # NEW: Heat Map Detection (Spatial SLAM)
-        visit_count = 0
-        if isinstance(map_id, int) and pos[0] is not None:
-            visit_count = long_term.get_visit_count(map_id, pos[0], pos[1])
-            
-        stagnation_context = ""
-        if visit_count > 20:
-            stagnation_context = f"\n⚠️ SPATIAL STAGNATION WARNING: You have visited this exact tile {visit_count} times in the past. Your previous strategies in {map_name} are clearly failing to progress. FORCE a completely new direction or random exploration goal. DO NOT repeat your previous sequence."
-
-        # Curiosity Roll: Stochastic experimentation
-        curiosity_roll = random.random()
-        curiosity_context = loop_context or stagnation_context
-        if not curiosity_context and curiosity_roll < 0.2: # 20% chance to "Experiment"
-            curiosity_context = """
-            💡 CURIOSITY MODE: Ignore the obvious path. Try something unexpected to see if it reveals a new area or reward.
-            """
-
-        # 4. Pull relevant skills for this context
-        skill_context = ""
-        if self.optimizer:
-            skill_context = self.optimizer.get_skills_for_map(map_id)
-
-        # 5. Goal Scaling: Dynamically adjust goal complexity based on session length
-        goal_scale = "Short-term tactical focus (next 20 steps)."
-        if ctx.get('party_count', 0) > 0:
-            goal_scale = "Mid-term exploration focus (next 50 steps)."
-
-        prompt = f"""
-        You are the STRATEGIC PLANNER for an AI playing {self.config.name}.
-        TASK: Synthesize the current state, memory, and completed objectives into a concrete, actionable curriculum.
+        is_dialogue = ctx.get('is_dialogue', False) or obs.state.has_dialogue_box or obs.state.has_dialogue_arrow
         
-        --- CURRENT CONTEXT ---
+        if is_dialogue or is_naming:
+            return "\n⚠️ DIALOGUE/UI BUSY: Player CANNOT move. Prioritize 'A', 'B' or 'START'."
+        return ""
+
+    def _get_stagnation_context(self, map_id, pos, long_term):
+        if not isinstance(map_id, int) or pos[0] is None:
+            return ""
+        count = long_term.get_visit_count(map_id, pos[0], pos[1])
+        if count > 20:
+            return f"\n⚠️ SPATIAL STAGNATION ({count} visits): FORCE a new direction."
+        return ""
+
+    def _get_curiosity_context(self, loop_text, stagnation_text):
+        if "🚨" in loop_text or "⚠️" in stagnation_text:
+            return ""
+        if random.random() < 0.2:
+            return "\n💡 CURIOSITY MODE: Try something unexpected."
+        return ""
+
+    def _build_prompt(self, obs, map_id, map_name, pos, recalled_text, knowledge, dialogue, stagnation, curiosity, skills):
+        completed = ""
+        if self.critic and self.critic.milestones:
+            completed = "\nCOMPLETED GLOBAL OBJECTIVES:\n- " + "\n- ".join(list(self.critic.milestones))
+
+        hints = ""
+        if self.config and self.config.profile and self.config.profile.memory_map_hints:
+            hints = f"\n--- GAME MEMORY MAP HINTS ---\n{self.config.profile.memory_map_hints}\n"
+
+        return f"""
+        You are the STRATEGIC PLANNER for an AI playing {self.config.name if self.config else 'Game'}.
         Map: #{map_id} [{map_name}] | Position: {pos}
-        Stage: {obs.state.stage.value}
-        {completed_milestones}
         OCR Text: "{obs.state.ocr_text}"
-        
-        WARNINGS/GUIDANCE FROM CRITIC:
-        {obs.guidance if obs.guidance else "None"}
-        
-        {dialogue_busy_context}
-        {stagnation_context}
-        {skill_context}
-        {external_context}
-        {curiosity_context}
-        {exploration_summary}
-        {goal_scale}
-        
-        RECALLED EXPERIENCES (Area: {map_name}):
+        {dialogue} {stagnation} {skills} {knowledge} {curiosity}
+        {hints}
+        {completed}
+        RECALLED EXPERIENCES:
         {recalled_text}
 
-        --- POKEMON RED MEMORY MAP HINTS ---
-        - 0xD35E = Current Map ID
-        - 0xD362 = Player X tile
-        - 0xD361 = Player Y tile
-        - 0xD16B = Badge count (0-8)
-        - 0xD163 = Party size
-        - 0xD31C = Player money (3 bytes BCD)
-
-        TASK: Define a high-level strategic goal for the next 50 steps.
-        
-        CRITICAL: Respond ONLY with a valid JSON object. Do not include markdown formatting, preamble, or any conversational text.
-
-        OUTPUT: JSON ONLY with the following structure:
+        OUTPUT: JSON ONLY:
         {{
-          "goal": "A specific, measurable long-term objective (e.g., 'Defeat Brock at Pewter Gym')",
-          "steps": ["Step 1", "Step 2", "Step 3"],
-          "abort_condition": "When to abandon this specific plan",
+          "goal": "long-term objective",
+          "steps": ["Step 1", "Step 2"],
+          "abort_condition": "When to abandon",
           "expected_map_after": int or null,
           "high_stakes": bool
         }}
         """
 
+    async def _execute_llm_plan(self, prompt, is_ui_busy):
         try:
-            from autogameplayer.utils.llm_utils import extract_json_from_llm_response
             response = await self.client.acreate_completion(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=200,
-                temperature=0.7
+                max_tokens=200, temperature=0.7
             )
-            
-            # Extract JSON from response
-            plan_data = extract_json_from_llm_response(response)
-            if not plan_data:
-                return {
-                    "goal": "Explore and progress.",
-                    "steps": ["Walk around", "Talk to NPCs"],
-                    "abort_condition": "Stagnation",
-                    "expected_map_after": None,
-                    "high_stakes": False
-                }, recalled
-
-            return plan_data, recalled
+            plan = extract_json_from_llm_response(response)
+            if plan: return plan
         except Exception as e:
             print(f"⚠️ Planning failed: {e}")
-            return {
-                "goal": "Explore and progress.",
-                "steps": ["Walk around", "Talk to NPCs"],
-                "abort_condition": "Stagnation",
-                "expected_map_after": None,
-                "high_stakes": False
-            }, []
+        
+        if is_ui_busy:
+            return {"goal": "Clear UI", "steps": ["Press A"], "abort_condition": "UI Clear", "expected_map_after": None, "high_stakes": False}
+        return {"goal": "Explore", "steps": ["Walk"], "abort_condition": "Stagnation", "expected_map_after": None, "high_stakes": False}

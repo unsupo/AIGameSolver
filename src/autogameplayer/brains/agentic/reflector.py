@@ -117,7 +117,7 @@ class ReflectionAgent:
                 max_tokens=600,
                 temperature=0.2
             )
-            from autogameplayer.utils.llm_utils import extract_json_from_llm_response
+            from autogameplayer.utils.llm import extract_json_from_llm_response
             analysis = extract_json_from_llm_response(response)
             
             if not analysis:
@@ -261,7 +261,7 @@ class ReflectionAgent:
         """
         
         try:
-            from autogameplayer.utils.llm_utils import extract_json_from_llm_response
+            from autogameplayer.utils.llm import extract_json_from_llm_response
             
             # Use image if available for visual debugging
             content = [{"type": "text", "text": prompt}]

@@ -10,6 +10,17 @@ class VisionEncoder:
         self.model = None
         self._initialized = False
         self._failed = False
+        self._embedding_dim = None
+
+    @property
+    def embedding_dim(self) -> int:
+        if self._embedding_dim:
+            return self._embedding_dim
+        return self.get_dim(self.model_name)
+
+    @embedding_dim.setter
+    def embedding_dim(self, value: int):
+        self._embedding_dim = value
 
     def _lazy_init(self):
         if self._initialized or self._failed:
@@ -24,6 +35,14 @@ class VisionEncoder:
             print(f"  - Loading vision model: {self.model_name}", flush=True)
             self.model = AutoModel.from_pretrained(self.model_name)
             
+            # Extract dimension from model config
+            if hasattr(self.model.config, "hidden_size"):
+                self.embedding_dim = self.model.config.hidden_size
+            elif hasattr(self.model.config, "dim"):
+                self.embedding_dim = self.model.config.dim
+            else:
+                self.embedding_dim = self.get_dim(self.model_name)
+                
             if torch.cuda.is_available():
                 self.device = "cuda"
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -33,13 +52,44 @@ class VisionEncoder:
             self.model.to(self.device)
             self.model.eval()
             self._initialized = True
-            print("  - Vision Encoder ready.", flush=True)
+            print(f"  - Vision Encoder ready (Dim: {self.embedding_dim}).", flush=True)
         except ImportError:
             print("⚠️ Vision dependencies (torch/transformers) not installed. Encoder running in passthrough mode.")
             self._failed = True
+            self.embedding_dim = self.get_dim(self.model_name)
         except Exception as e:
             print(f"⚠️ Vision Encoder failed to initialize: {e}. Running in passthrough mode.")
             self._failed = True
+            self.embedding_dim = self.get_dim(self.model_name)
+
+    @staticmethod
+    def get_dim(model_name: str) -> int:
+        """Returns the embedding dimension for known models without full initialization."""
+        # Hardcoded mapping for performance/offline mode
+        mapping = {
+            "facebook/dinov2-small": 384,
+            "facebook/dinov2-base": 768,
+            "facebook/dinov2-large": 1024,
+            "facebook/dinov2-giant": 1536,
+            "google/vit-base-patch16-224": 768,
+            "openai/clip-vit-base-patch32": 512,
+        }
+        
+        if model_name in mapping:
+            return mapping[model_name]
+
+        # Dynamic fallback: try to load config
+        try:
+            from transformers import AutoConfig
+            config = AutoConfig.from_pretrained(model_name)
+            if hasattr(config, "hidden_size"):
+                return config.hidden_size
+            elif hasattr(config, "dim"):
+                return config.dim
+        except Exception:
+            pass
+
+        return 384 # Final default to 384 if everything fails
 
     def encode(self, image: Image.Image):
         """Processes an image into a latent vector."""
@@ -47,7 +97,7 @@ class VisionEncoder:
         
         if self._failed:
             # Return an empty/zero vector if vision is disabled
-            return np.zeros(384, dtype=np.float32) # Default size for DINOv2 small
+            return np.zeros(self.embedding_dim, dtype=np.float32)
 
         import torch
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)

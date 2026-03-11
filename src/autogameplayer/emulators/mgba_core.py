@@ -90,12 +90,16 @@ class MGBAEmulator(BaseEmulator):
             self.lib.gba_step()
 
     def read_memory(self, address: int) -> int:
+        # Step the emulator to ensure we are reading a fresh state
+        self.lib.gba_step()
         return self.lib.gba_read_memory(address)
 
     def write_memory(self, address: int, value: int):
         self.lib.gba_write_memory(address, value)
 
     def read_memory_block(self, address: int, length: int) -> bytes:
+        # Step once before the block read
+        self.lib.gba_step()
         return bytes([self.lib.gba_read_memory(address + i) for i in range(length)])
 
     def manage_checkpoint(self, action: str, slot: int):

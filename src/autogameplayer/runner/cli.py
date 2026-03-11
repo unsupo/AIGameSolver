@@ -38,11 +38,11 @@ async def run_autogame(config_path: str):
     await client.connect()
 
     try:
-        # Load Slot 0 if it exists
+        # Load bootstrap state if it exists
         try:
-            print("💾 Checking for bootstrap checkpoint in slot 0...")
-            await client.call_tool("manage_checkpoint", {"action": "load", "slot": 0})
-            print("🚀 Bootstrap checkpoint loaded! (Pallet Town Start)")
+            print(f"💾 Checking for bootstrap checkpoint in slot {settings.bootstrap_slot}...")
+            await client.call_tool("manage_checkpoint", {"action": "load", "slot": settings.bootstrap_slot})
+            print("🚀 Bootstrap checkpoint loaded!")
         except Exception:
             print("ℹ️ No bootstrap checkpoint found. Starting from current state.")
 

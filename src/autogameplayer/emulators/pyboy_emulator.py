@@ -74,13 +74,16 @@ class PyBoyWrapper(BaseEmulator):
             self.pyboy.tick(render=True)
 
     def read_memory(self, address: int) -> int:
+        # Step once to ensure RAM state reflects the most recent CPU execution
+        self.pyboy.tick(render=False)
         return self.pyboy.memory[address]
 
     def write_memory(self, address: int, value: int):
         self.pyboy.memory[address] = value
 
     def read_memory_block(self, address: int, length: int) -> bytes:
-        """Leverages PyBoy's internal memory buffer for fast block reading."""
+        # Step once to ensure RAM state reflects the most recent CPU execution
+        self.pyboy.tick(render=False)
         return bytes(self.pyboy.memory[address : address + length])
 
     def close(self):

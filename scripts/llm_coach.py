@@ -10,7 +10,6 @@ import numpy as np
 from autogameplayer.core.mcp_client import MCPClient
 from autogameplayer.core.config import settings
 from autogameplayer.core.environment import EmulatorEnvironment
-from autogameplayer.core.controllers import StandardController, GBAController
 from autogameplayer.brains.llm_brain import LLMBrain
 from autogameplayer.rewards.exploration import ExplorationReward
 from autogameplayer.core.models import Action
@@ -34,7 +33,12 @@ async def llm_coach_session(rom_path: str, model_path: str):
     
     try:
         # 1. Setup
-        controller = GBAController() if rom_path.lower().endswith(".gba") else StandardController()
+        from autogameplayer.core.registry import Registry
+        controller_name = settings.default_controller
+        if rom_path.lower().endswith(".gba"):
+            controller_name = "gba"
+            
+        controller = Registry.create_controller(controller_name)
         env = EmulatorEnvironment(client, reward_functions=[ExplorationReward()])
         
         # Load latest model if it exists
@@ -46,8 +50,10 @@ async def llm_coach_session(rom_path: str, model_path: str):
         llm_brain = LLMBrain(controller)
         
         # Load latest state
-        try: await client.call_tool("manage_checkpoint", {"action": "load", "slot": 0})
-        except: pass
+        try:
+            await client.call_tool("manage_checkpoint", {"action": "load", "slot": settings.bootstrap_slot})
+        except Exception:
+            pass
         
         obs = await env.reset()
         lstm_states = None
@@ -81,7 +87,7 @@ async def llm_coach_session(rom_path: str, model_path: str):
             else:
                 if stagnation_counter >= 10:
                     print("✅ LLM Coach got us unstuck! Saving new curriculum checkpoint.")
-                    await client.call_tool("manage_checkpoint", {"action": "save", "slot": 0})
+                    await client.call_tool("manage_checkpoint", {"action": "save", "slot": settings.bootstrap_slot})
                     stagnation_counter = 0
                     print("▶️ Handing control back to RL Agent...")
                 else:

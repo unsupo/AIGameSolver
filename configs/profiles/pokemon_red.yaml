@@ -1,3 +1,12 @@
+controller_type: "gb"
+memory_map_hints: |
+  - 0xD35E = Current Map ID
+  - 0xD362 = Player X tile
+  - 0xD361 = Player Y tile
+  - 0xD16B = Badge count (0-8)
+  - 0xD163 = Party size
+  - 0xD31C = Player money (3 bytes BCD)
+
 ram:
   map_id: 0xD35E
   x_pos: 0xD362

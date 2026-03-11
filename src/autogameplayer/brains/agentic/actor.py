@@ -3,8 +3,7 @@ import random
 from typing import Optional
 from autogameplayer.core.models import Observation, Action
 from autogameplayer.core.config_loader import GameConfig
-from autogameplayer.utils.llm import LLMClientProtocol
-from autogameplayer.utils.llm_utils import extract_json_from_llm_response
+from autogameplayer.utils.llm import LLMClientProtocol, extract_json_from_llm_response
 from .memory import EpisodicMemory
 
 class BaseActor:
@@ -364,9 +363,12 @@ class ActorAgent:
     async def get_next_action(self, obs: Observation, plan: dict, memory: EpisodicMemory, mcp_client=None, drift: bool = False, session_metrics: dict = None) -> Action:
         # 1. Try High-Confidence Manual Policy first (0 Token cost)
         policy_action = self.policy.get_action(obs, plan)
-        if policy_action and not drift:
-            print(f"⚡ Policy Action: {policy_action.button.upper() if policy_action.button else 'WAIT'} | {policy_action.reasoning}")
-            return policy_action
+        if policy_action:
+            # UI policies (Dialogue/Naming) should ALWAYS trigger even during drift
+            is_ui_policy = any(r in policy_action.reasoning for r in ["Dialogue", "Naming", "Interface"])
+            if is_ui_policy or not drift:
+                print(f"⚡ Policy Action: {policy_action.button.upper() if policy_action.button else 'WAIT'} | {policy_action.reasoning}")
+                return policy_action
 
         # 2. Try Learned Policy (Historical successful actions)
         learned_action = self.learned_policy.get_action(obs)

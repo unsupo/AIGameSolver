@@ -4,6 +4,7 @@ from autogameplayer.core.interfaces import Environment, RewardFunction
 from autogameplayer.core.models import GameState, Action, Observation
 from autogameplayer.core.mcp_client import MCPClient
 from autogameplayer.utils.state_tracker import StateTracker
+from autogameplayer.utils.timing import frames_to_seconds
 
 class EmulatorEnvironment(Environment):
     """High-level Environment with State Deduplication and Macro support."""
@@ -128,7 +129,7 @@ class EmulatorEnvironment(Environment):
             
             # Wait for the total estimated macro duration
             total_frames = sum(m.get('frames', 10) for m in macro_list)
-            await asyncio.sleep(total_frames / 60.0 + 0.1)
+            await asyncio.sleep(frames_to_seconds(total_frames) + 0.1)
             
             # Re-sync state after macro
             state_json = await self.client.call_tool("get_game_state", {"include_ocr": True})
@@ -150,7 +151,7 @@ class EmulatorEnvironment(Environment):
                 await self.client.call_tool("send_input", input_args)
                 
                 # 2. Wait for the action to complete
-                await asyncio.sleep(action.duration / 60.0 + 0.05)
+                await asyncio.sleep(frames_to_seconds(action.duration) + 0.05)
                 
                 # 3. If until_visual_change is set, check if we should break
                 if action.until_visual_change:

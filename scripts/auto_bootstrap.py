@@ -42,8 +42,8 @@ async def bootstrap():
             
             if map_id > 0:
                 print(f"✅ Reached Game World! (Map ID: {map_id})")
-                print("💾 Saving bootstrap state to Slot 0...")
-                await client.call_tool("manage_checkpoint", {"action": "save", "slot": 0})
+                print(f"💾 Saving bootstrap state to Slot {settings.bootstrap_slot}...")
+                await client.call_tool("manage_checkpoint", {"action": "save", "slot": settings.bootstrap_slot})
                 print("✨ Bootstrap Complete.")
                 break
             
