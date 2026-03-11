@@ -5,6 +5,14 @@ from typing import Callable
 import functools
 import asyncio
 
+def check_and_add_column(conn: sqlite3.Connection, table: str, column: str, definition: str):
+    """Checks if a column exists in a table, and adds it if not."""
+    cursor = conn.execute(f"PRAGMA table_info({table})")
+    columns = [row[1] for row in cursor.fetchall()]
+    if column not in columns:
+        print(f"🛠️ DB Migration: Adding column '{column}' to table '{table}'")
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
 def get_db_connection(db_path: Path, timeout: int = 30) -> sqlite3.Connection:
     """Returns a SQLite connection with WAL mode enabled and a long timeout."""
     conn = sqlite3.connect(str(db_path), timeout=timeout)
@@ -148,34 +156,31 @@ def ensure_ltm_schema(db_path: Path):
                         map_id INTEGER,
                         x INTEGER,
                         y INTEGER,
-                        state INTEGER DEFAULT 1, -- Deprecated, use impassable_score
-                        impassable_score REAL DEFAULT 0.0, -- 0.0 (Walkable) to 1.0 (Static Wall)
-                        is_warp INTEGER DEFAULT 0, -- 1 if this tile triggers a map transition
+                        state INTEGER DEFAULT 1,
+                        impassable_score REAL DEFAULT 0.0,
+                        is_warp INTEGER DEFAULT 0,
+                        visit_count INTEGER DEFAULT 1,
                         last_seen REAL,
                         PRIMARY KEY(map_id, x, y)
                     )
                 """)
+
+                # 7. Dead Ends Table (State hashes that lead to stagnation across sessions)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS dead_ends (
+                        vision_hash TEXT PRIMARY KEY,
+                        occurrence_count INTEGER DEFAULT 1,
+                        last_session_id TEXT,
+                        timestamp REAL
+                    )
+                """)
                 
                 # --- MIGRATIONS ---
-                try:
-                    conn.execute("ALTER TABLE memories ADD COLUMN type TEXT")
-                except sqlite3.OperationalError:
-                    pass
-
-                try:
-                    conn.execute("ALTER TABLE explored_locations ADD COLUMN state INTEGER DEFAULT 1")
-                except sqlite3.OperationalError:
-                    pass
-                
-                try:
-                    conn.execute("ALTER TABLE explored_locations ADD COLUMN impassable_score REAL DEFAULT 0.0")
-                except sqlite3.OperationalError:
-                    pass
-
-                try:
-                    conn.execute("ALTER TABLE explored_locations ADD COLUMN is_warp INTEGER DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass
+                check_and_add_column(conn, "explored_locations", "state", "INTEGER DEFAULT 1")
+                check_and_add_column(conn, "explored_locations", "impassable_score", "REAL DEFAULT 0.0")
+                check_and_add_column(conn, "explored_locations", "is_warp", "INTEGER DEFAULT 0")
+                check_and_add_column(conn, "explored_locations", "visit_count", "INTEGER DEFAULT 1")
+                check_and_add_column(conn, "memories", "type", "TEXT")
                 # ------------------
                 
                 conn.commit()
@@ -188,6 +193,7 @@ def ensure_ltm_schema(db_path: Path):
             raise e
     
     print(f"❌ Failed to initialize LTM Database at {db_path}: {last_err}")
+
 
 def self_healing_db(db_path_attr: str):
     """

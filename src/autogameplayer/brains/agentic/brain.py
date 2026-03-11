@@ -42,7 +42,7 @@ class AgenticBrain(Brain):
 
         self.memory = EpisodicMemory()
         self.long_term_memory = LongTermMemory(self.client)        
-        self.critic = CriticAgent(ltm=self.long_term_memory)
+        self.critic = CriticAgent(ltm=self.long_term_memory, session_id=self.session_id)
         self.optimizer = StrategyOptimizer(self.client, self.reflector_model)
         self.knowledge = KnowledgeBase(self.client)
         
@@ -108,7 +108,9 @@ class AgenticBrain(Brain):
             task.add_done_callback(self._tasks.discard)
 
         # 2. Outcome Processing from last step
-        await self._process_step_outcome(observation, mcp_client=mcp_client)
+        rollback_occurred = await self._process_step_outcome(observation, mcp_client=mcp_client)
+        if rollback_occurred:
+            return Action(button="none", duration=10, reasoning="Dead End Rollback: Resetting to Bootstrap state.")
 
         # 3. Handle Stagnation & Timeline Branching
         if observation.guidance and "STAGNATION" in observation.guidance:
@@ -204,29 +206,32 @@ class AgenticBrain(Brain):
             
             compression = self.memory.compressor.detect_repeats()
             if compression and self.drift_steps == 0:
-                if compression["type"] == "spam":
-                    print(f"⚡ Reflex: Compressing {compression['button'].upper()} spam (repeat: 10).")
-                    action = Action(
-                        button=compression["button"], 
-                        repeat=10, 
-                        until_visual_change=True,
-                        reasoning=f"Automatic reflex: Compressed repeated {compression['button'].upper()} presses."
-                    )
-                    self.memory.record_step(observation, action)
-                    self.step_count += 1
-                    return action
-                elif compression["type"] == "pattern":
-                    p_str = " -> ".join([b.upper() for b in compression["pattern"]])
-                    print(f"⚡ Reflex: Compressing pattern {p_str}.")
-                    macro_actions = [Action(button=b, duration=5) for b in compression["pattern"]]
-                    action = Action(
-                        macro=macro_actions,
-                        repeat=3,
-                        reasoning=f"Automatic reflex: Compressed repeated pattern {p_str}."
-                    )
-                    self.memory.record_step(observation, action)
-                    self.step_count += 1
-                    return action
+                # Double check the button is valid
+                btn = compression.get("button")
+                if btn and btn.lower() != "none":
+                    if compression["type"] == "spam":
+                        print(f"⚡ Reflex: Compressing {btn.upper()} spam (repeat: 10).")
+                        action = Action(
+                            button=btn, 
+                            repeat=10, 
+                            until_visual_change=True,
+                            reasoning=f"Automatic reflex: Compressed repeated {btn.upper()} presses."
+                        )
+                        self.memory.record_step(observation, action)
+                        self.step_count += 1
+                        return action
+                    elif compression["type"] == "pattern":
+                        p_str = " -> ".join([b.upper() for b in compression["pattern"]])
+                        print(f"⚡ Reflex: Compressing pattern {p_str}.")
+                        macro_actions = [Action(button=b, duration=5) for b in compression["pattern"]]
+                        action = Action(
+                            macro=macro_actions,
+                            repeat=3,
+                            reasoning=f"Automatic reflex: Compressed repeated pattern {p_str}."
+                        )
+                        self.memory.record_step(observation, action)
+                        self.step_count += 1
+                        return action
 
             try:
                 session_metrics = {
@@ -365,6 +370,32 @@ class AgenticBrain(Brain):
         
         reward_delta, is_stuck, critic_guidance, is_loop = self.critic.evaluate(self.memory, observation)
         self.memory.update_last_step(observation, is_stuck)
+
+        # --- FEATURE: Recursive Dead End Rollback ---
+        # If this EXACT visual state has caused stagnation in 3+ separate sessions,
+        # assume the current 'Frontier' save is a Dead End and rollback to Bootstrap.
+        if self.long_term_memory:
+            dead_end_count = self.long_term_memory.get_dead_end_count(observation.state_hash)
+            if dead_end_count >= 3:
+                print(f"💀 DEAD END DETECTED: This state ({observation.state_hash}) has failed in {dead_end_count} sessions.")
+                print(f"🔄 Recursive Rollback: Returning to Slot {settings.bootstrap_slot} (Bootstrap).")
+                
+                if mcp_client:
+                    # 1. Force load the absolute starting point
+                    asyncio.create_task(mcp_client.call_tool("manage_checkpoint", {"action": "load", "slot": settings.bootstrap_slot}))
+                    
+                    # 2. Add a strong negative memory to the LTM to penalize the path that led here
+                    asyncio.create_task(self.long_term_memory.add_memory(
+                        f"DEAD END PATH: The route leading to state {observation.state_hash} is a failure. Try a totally different strategy.",
+                        {"type": "rule", "penalty": 10.0, "state_hash": observation.state_hash}
+                    ))
+                
+                # Reset session progress to avoid immediate re-trigger
+                self.stagnation_counter = 0
+                self.drift_steps = 50 # Heavier drift to escape the old timeline
+                # We return True to indicate a rollback occurred
+                return True
+        # --------------------------------------------
 
         if critic_guidance:
             observation.guidance = (observation.guidance + "\n" + critic_guidance) if observation.guidance else critic_guidance

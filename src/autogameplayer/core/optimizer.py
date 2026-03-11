@@ -618,6 +618,45 @@ class StrategyOptimizer:
         except Exception as e:
             print(f"⚠️ Sequence mining failed: {e}")
 
+    def _evolve_macro(self, parent_a: Optional[Dict[str, Any]], parent_b: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Handles the logic of mutating or crossing over macros with safety checks."""
+        if not parent_a:
+            return None
+            
+        try:
+            # 1. Sequence Validation
+            seq_a = json.loads(parent_a['macro_json']) if isinstance(parent_a['macro_json'], str) else parent_a['macro_json']
+            if not seq_a:
+                return None
+                
+            if parent_b:
+                seq_b = json.loads(parent_b['macro_json']) if isinstance(parent_b['macro_json'], str) else parent_b['macro_json']
+                if not seq_b:
+                    # Fallback to mutation of parent_a if parent_b is invalid
+                    new_seq = self._mutate_macro(seq_a)
+                    desc = f"Mutation of {parent_a['name'] or parent_a['description']}"
+                else:
+                    new_seq = self._crossover_macros(seq_a, seq_b)
+                    desc = f"Crossover: {parent_a['name'] or 'Macro'} x {parent_b['name'] or 'Macro'}"
+            else:
+                new_seq = self._mutate_macro(seq_a)
+                desc = f"Mutation of {parent_a['name'] or parent_a['description']}"
+
+            # 2. Vision Vector Validation (The 'Genome')
+            v_blob = parent_a.get('vision_vector')
+            if not v_blob:
+                return None
+                
+            return {
+                "sequence": new_seq,
+                "vision_vector": np.frombuffer(v_blob, dtype=np.float32).tolist(),
+                "desc": desc,
+                "parent": parent_a
+            }
+        except Exception as e:
+            print(f"⚠️ Internal evolution step failed: {e}")
+            return None
+
     @database_write("db_path")
     def evolve_population(self, top_k: int = 5, variants_per_macro: int = 2):
         """Evolves the current macro population using mutations and crossover."""
@@ -644,33 +683,23 @@ class StrategyOptimizer:
                     if rel < 0.8: actual_variants += 2 
                     
                     for _ in range(actual_variants):
-                        mutated_seq = self._mutate_macro(json.loads(parent['macro_json']))
-                        new_variants.append({
-                            "parent": parent,
-                            "sequence": mutated_seq,
-                            "desc": f"Mutation of {parent['name'] or parent['description']}"
-                        })
+                        variant = self._evolve_macro(parent)
+                        if variant:
+                            new_variants.append(variant)
                 
                 # 2. Crossover (if we have at least 2 parents)
                 if len(parents) >= 2:
                     for _ in range(variants_per_macro):
                         p1, p2 = random.sample(parents, 2)
-                        crossed_seq = self._crossover_macros(
-                            json.loads(p1['macro_json']), 
-                            json.loads(p2['macro_json'])
-                        )
-                        new_variants.append({
-                            "parent": p1, 
-                            "sequence": crossed_seq,
-                            "desc": f"Crossover: {p1['name'] or 'Macro'} x {p2['name'] or 'Macro'}"
-                        })
+                        variant = self._evolve_macro(p1, p2)
+                        if variant:
+                            new_variants.append(variant)
 
                 # 3. Save new variants
                 for var in new_variants:
                     p = var['parent']
-                    v_vec = np.frombuffer(p['vision_vector'], dtype=np.float32).tolist()
                     self.save_macro(
-                        vision_vector=v_vec,
+                        vision_vector=var['vision_vector'],
                         sequence=var['sequence'],
                         map_id=p['map_id'],
                         coords=(0,0),

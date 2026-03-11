@@ -44,6 +44,11 @@ class ActionCompressor:
         
         # Check for simple single-button spam (e.g., A A A A)
         last_btn = seq[-1]
+        
+        # FIX: Never compress 'none' or empty buttons
+        if not last_btn or last_btn.lower() == "none":
+            return None
+
         if all(b == last_btn for b in seq[-4:]):
             # Found at least 4 repeats
             count = 0
@@ -237,6 +242,35 @@ class LongTermMemory:
 
     @database_write("storage_path")
     @self_healing_db("storage_path")
+    async def record_dead_end(self, vision_hash: str, session_id: str):
+        """Records that a specific visual state led to stagnation in a session."""
+        try:
+            with get_db_connection(self.storage_path) as conn:
+                conn.execute(
+                    """INSERT INTO dead_ends (vision_hash, last_session_id, timestamp) 
+                    VALUES (?, ?, ?) 
+                    ON CONFLICT(vision_hash) DO UPDATE SET 
+                        occurrence_count = occurrence_count + 1, 
+                        last_session_id = ?, 
+                        timestamp = ?""",
+                    (vision_hash, session_id, time.time(), session_id, time.time())
+                )
+                conn.commit()
+        except Exception: pass
+
+    @self_healing_db("storage_path")
+    def get_dead_end_count(self, vision_hash: str) -> int:
+        """Returns how many unique sessions have flagged this state as a dead end."""
+        try:
+            with get_db_connection(self.storage_path) as conn:
+                cursor = conn.execute("SELECT occurrence_count FROM dead_ends WHERE vision_hash = ?", (vision_hash,))
+                row = cursor.fetchone()
+                return row[0] if row else 0
+        except Exception:
+            return 0
+
+    @database_write("storage_path")
+    @self_healing_db("storage_path")
     async def add_event_pattern(self, state_hash: str, action: Action, result_hash: str, reward: float, map_id: int):
         """Records a procedural event: state A + action -> state B."""
         try:
@@ -411,10 +445,13 @@ class LongTermMemory:
             emb_list = await self.client.acreate_embedding(text, model=self.model)
             embedding = np.array(emb_list, dtype=np.float32)
             
+            # Extract type for direct column storage
+            mem_type = metadata.get("type", "generic")
+            
             with get_db_connection(self.storage_path) as conn:
                 conn.execute(
-                    "INSERT OR IGNORE INTO memories (text, metadata, embedding) VALUES (?, ?, ?)",
-                    (text, json.dumps(metadata), embedding.tobytes())
+                    "INSERT OR IGNORE INTO memories (text, type, metadata, embedding) VALUES (?, ?, ?, ?)",
+                    (text, mem_type, json.dumps(metadata), embedding.tobytes())
                 )
             print(f"💾 Milestone Recorded: {text[:50]}...")
         except Exception as e:

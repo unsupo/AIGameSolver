@@ -5,10 +5,11 @@ from .memory import EpisodicMemory
 
 class CriticAgent:
     """Agent responsible for evaluating performance and detecting stagnation (stuck states)."""
-    def __init__(self, ltm=None):
+    def __init__(self, ltm=None, session_id: str = "default"):
         self.milestones = set()
         self.last_states = {} # Tracks previous values for transition detection
         self.ltm = ltm
+        self.session_id = session_id
         self._load_global_milestones()
         
     def _load_global_milestones(self):
@@ -239,5 +240,11 @@ class CriticAgent:
             if directional and static:
                 is_stuck = True
                 guidance = "MOVEMENT BLOCKED: You are walking but your coordinates are not changing. You are hitting an obstacle."
+        
+        # --- FEATURE: Dead End Persistence ---
+        if is_stuck and self.ltm:
+            # Record this visual state as a 'Dead End' in persistent memory
+            asyncio.create_task(self.ltm.record_dead_end(current_obs.state_hash, self.session_id))
+        # ------------------------------------
             
         return reward_delta, is_stuck, guidance, is_loop

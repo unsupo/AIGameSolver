@@ -115,8 +115,10 @@ def main():
         asyncio.run(run_autogame(args.config))
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
-    except Exception:
-        pass # Final catch-all for silent exit
+    except Exception as e:
+        print(f"❌ AI Player crashed: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
