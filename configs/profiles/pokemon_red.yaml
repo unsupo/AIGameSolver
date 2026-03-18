@@ -60,29 +60,47 @@ maps:
   41: "Rival's House"
 curriculum:
   - name: "PALLET_WORLD"
-    address: 0xD35E
-    target_value: 1
     description: "Exit the intro and reach the Pallet Town world map."
+    condition:
+      type: "ram"
+      params:
+        address: 0xD35E
+        target_value: 1
   - name: "HAS_POKEMON"
-    address: 0xD11B
-    target_value: 1
     description: "Obtain a starter Pokemon from Professor Oak."
+    condition:
+      type: "ram"
+      params:
+        address: 0xD11B
+        target_value: 1
   - name: "ROUTE_1"
-    address: 0xD35E
-    target_value: 12
     description: "Successfully walk north into Route 1."
+    condition:
+      type: "ram"
+      params:
+        address: 0xD35E
+        target_value: 12
   - name: "VIRIDIAN_CITY"
-    address: 0xD35E
-    target_value: 2
     description: "Reach Viridian City."
+    condition:
+      type: "ram"
+      params:
+        address: 0xD35E
+        target_value: 2
   - name: "LEVEL_7"
-    address: 0xD18C
-    target_value: 7
     description: "Level up the starter Pokemon to Level 7."
+    condition:
+      type: "ram"
+      params:
+        address: 0xD18C
+        target_value: 7
   - name: "FIRST_BADGE"
-    address: 0xD356
-    target_value: 1
     description: "Defeat Brock and earn the Boulder Badge."
+    condition:
+      type: "ram"
+      params:
+        address: 0xD356
+        target_value: 1
 known_locations:
   - "POKEMON CENTER"
   - "POKEMART"

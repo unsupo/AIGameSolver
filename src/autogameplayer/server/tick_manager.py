@@ -2,14 +2,16 @@ import time
 import threading
 from autogameplayer.utils.timing import frames_to_seconds
 
+
 class TickManager:
     """Manages the emulator's execution loop and tick synchronization."""
+
     def __init__(self, emulator, lock):
         self.emulator = emulator
         self.lock = lock
         self.total_ticks = 0
         self.running = True
-        
+
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
 
@@ -33,4 +35,5 @@ class TickManager:
                 self.total_ticks += 1
             elapsed = time.perf_counter() - start_t
             sleep_t = frame_time - elapsed
-            if sleep_t > 0: time.sleep(sleep_t)
+            if sleep_t > 0:
+                time.sleep(sleep_t)

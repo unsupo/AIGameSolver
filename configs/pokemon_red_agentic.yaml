@@ -10,14 +10,19 @@ rewards:
       threshold: 0.1
   - type: "dialogue_discovery"
     params:
-      reward_value: 5.0
+      reward_value: .5
 brain: "agentic"
 llm_model: "gemma3:4b"
-# planner_model: "gemma3:12b"
-# reflector_model: "gemma3:12b"
+planner_model: "gemma3:4b"
+reflector_model: "gemma3:4b"
 steps: 1000
 heuristics:
   intro_map_id: 0
   overworld_map_id: 12
   auto_pilot_until_map: 0
+  # ADD THIS: Forces the LLM to act even if the policy is confident
+  # after X number of stagnant coordinates.
+  stagnation_threshold_minutes: 5.0
+  # ADD THIS: Injects random D-pad movement to break mashing loops
+  exploration_entropy: 0.2
 render_delay: 0.01

@@ -17,8 +17,8 @@ print("Skipping 1500 frames...")
 start_t = time.time()
 for i in range(1500):
     pyboy.tick(render=False)
-    if (i+1) % 100 == 0:
-        print(f"  - Ticked {i+1} frames...")
+    if (i + 1) % 100 == 0:
+        print(f"  - Ticked {i + 1} frames...")
 print(f"Skipped 1500 frames in {time.time() - start_t:.2f}s")
 
 pyboy.stop()

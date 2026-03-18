@@ -32,11 +32,18 @@ class Image:
         png_file.write_close()
         return success
 
-    if 'PImage' in globals():
+    if "PImage" in globals():
+
         def to_pil(self):
             colorspace = "RGBA" if self.alpha else "RGBX"
-            return PImage.frombytes(colorspace, (self.width, self.height), ffi.buffer(self.buffer), "raw",
-                                    colorspace, self.stride * 4)
+            return PImage.frombytes(
+                colorspace,
+                (self.width, self.height),
+                ffi.buffer(self.buffer),
+                "raw",
+                colorspace,
+                self.stride * 4,
+            )
 
 
 def u16_to_u32(color):
@@ -66,6 +73,7 @@ def u32_to_u16(color):
 
 
 if ffi.sizeof("mColor") == 2:
+
     def color_to_u16(color):
         return color
 
@@ -76,6 +84,7 @@ if ffi.sizeof("mColor") == 2:
 
     u32_to_color = u32_to_u16  # pylint: disable=invalid-name
 else:
+
     def color_to_u32(color):
         return color
 

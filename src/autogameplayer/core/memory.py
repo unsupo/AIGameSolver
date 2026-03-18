@@ -3,13 +3,18 @@ from abc import ABC, abstractmethod
 from autogameplayer.core.config import settings
 from autogameplayer.core.interfaces import IMemoryReader
 
+
 class MemoryReader(IMemoryReader, ABC):
     """Legacy alias for IMemoryReader."""
+
     @abstractmethod
-    async def read_byte(self, address: int) -> int: pass
+    async def read_byte(self, address: int) -> int:
+        pass
+
 
 class GlobalKnowledgeBase:
     """Persists discovered RAM addresses across sessions for any ROM."""
+
     def __init__(self, rom_hash: str):
         self.storage_dir = settings.base_dir / "datasets" / "knowledge"
         self.storage_dir.mkdir(parents=True, exist_ok=True)

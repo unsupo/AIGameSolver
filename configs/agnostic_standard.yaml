@@ -6,7 +6,7 @@ controller: "dynamic"         # Triggers get_capabilities tool
 
 # Vision & Intelligence
 vision: "facebook/dinov2-small"
-brain: "agentic_v2"           # The new agnostic Actor/Planner
+brain: "agentic"           # The new agnostic Actor/Planner
 perception_level: "full"      # Vision + Agnostic Memory Dumps
 
 # Evolution & Training Settings

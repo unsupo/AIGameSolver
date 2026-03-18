@@ -5,7 +5,11 @@ from autogameplayer.core.interfaces import Brain, Controller
 from autogameplayer.core.models import Observation, Action
 from autogameplayer.core.config import settings
 from autogameplayer.core.config_loader import GameConfig
-from autogameplayer.utils.llm import LLMClientProtocol, OllamaBootstrap, extract_json_from_llm_response
+from autogameplayer.utils.llm import (
+    LLMClientProtocol,
+    OllamaBootstrap,
+    extract_json_from_llm_response,
+)
 from autogameplayer.core.registry import Registry
 
 from autogameplayer.core.optimizer import StrategyOptimizer
@@ -17,10 +21,17 @@ from .agentic.critic import CriticAgent
 
 from .agentic.actor import ActorAgent
 
+
 @Registry.register_brain("llm")
 class LLMBrain(Brain):
     """A high-intelligence LLM brain capable of navigating intros and naming screens."""
-    def __init__(self, controller: Controller, config: GameConfig = None, llm_client: LLMClientProtocol = None):
+
+    def __init__(
+        self,
+        controller: Controller,
+        config: GameConfig = None,
+        llm_client: LLMClientProtocol = None,
+    ):
         self._tasks: set[asyncio.Task] = set()
         self.controller = controller
         self.config = config
@@ -29,41 +40,52 @@ class LLMBrain(Brain):
         self.summary = "Just started the game."
         self.last_outcome = "Fresh start."
         self.model = (config.llm_model if config else None) or settings.llm_model
-        self.session_id = f"session_{int(time.time())}" # Unique ID for this run
+        self.session_id = f"session_{int(time.time())}"  # Unique ID for this run
         self.step_count = 0
         self.last_map_id = -1
         self._is_reflecting = False
-        
+
         # Bootstrap handled by utility
         OllamaBootstrap.bootstrap([self.model, "nomic-embed-text"])
 
         if llm_client is None:
             from autogameplayer.utils.llm import get_llm_client
+
             self.client = get_llm_client()
         else:
             self.client = llm_client
-        
+
         # Unified Memory Infrastructure
-        self.critic = CriticAgent()
         self.memory = EpisodicMemory()
-        self.optimizer = StrategyOptimizer(self.client, self.model)
         self.long_term_memory = LongTermMemory(self.client)
+        self.optimizer = StrategyOptimizer(self.client, self.model)
+        self.critic = CriticAgent(
+            ltm=self.long_term_memory, session_id=self.session_id, config=self.config
+        )
         self.knowledge = KnowledgeBase(self.client)
-        self.actor = ActorAgent(self.client, self.model, self.buttons, self.config, ltm=self.long_term_memory, optimizer=self.optimizer)
+        self.actor = ActorAgent(
+            self.client,
+            self.model,
+            self.buttons,
+            self.config,
+            ltm=self.long_term_memory,
+            optimizer=self.optimizer,
+        )
         self.reflector = ReflectionAgent(self.client, self.model, self.optimizer)
-        
+
         print(f"🧠 LLM Brain Initialized | Model: {self.model}")
 
     @property
-    def has_reflection(self) -> bool: return True
+    def has_reflection(self) -> bool:
+        return True
 
     async def act(self, observation: Observation, mcp_client=None) -> Action:
         # 1. Process PREVIOUS step outcome
         await self._process_step_outcome(observation, mcp_client=mcp_client)
-        
+
         ctx = observation.state.context
-        map_id = ctx.get('map_id', 0)
-        
+        map_id = ctx.get("map_id", 0)
+
         # 2. Periodic Optimization
         if self.step_count % 50 == 0:
             self.optimizer.optimize()
@@ -77,7 +99,9 @@ class LLMBrain(Brain):
             self.optimizer.evolve_population(top_k=5)
 
         # 3. Agnostic Auto-Pilot Heuristic
-        auto_pilot_threshold = self.config.heuristics.auto_pilot_until_map if self.config else 0
+        auto_pilot_threshold = (
+            self.config.heuristics.auto_pilot_until_map if self.config else 0
+        )
         if map_id < auto_pilot_threshold:
             action = self._handle_auto_pilot(map_id)
             self.memory.record_step(observation, action)
@@ -88,17 +112,15 @@ class LLMBrain(Brain):
         try:
             # We use the current summary as the plan for the actor
             action = await self.actor.get_next_action(
-                observation, 
-                self.summary, 
-                self.memory, 
-                mcp_client=mcp_client
+                observation, self.summary, self.memory, mcp_client=mcp_client
             )
             # Update internal state from action reasoning
-            if action.button: self.history.append(action.button.upper())
+            if action.button:
+                self.history.append(action.button.upper())
         except Exception as e:
             print(f"⚠️ LLM Action Error: {e}")
             action = self.fallback_action(self.controller)
-            
+
         self.memory.record_step(observation, action)
         self.step_count += 1
         return action
@@ -106,18 +128,23 @@ class LLMBrain(Brain):
     async def _process_step_outcome(self, observation: Observation, mcp_client=None):
         reward_delta, is_stuck, _, _ = self.critic.evaluate(self.memory, observation)
         self.memory.update_last_step(observation, is_stuck)
-        
+
         if self.memory.steps:
             last_record = self.memory.steps[-1]
-            task = asyncio.create_task(self.long_term_memory.add_step_to_replay(self.session_id, self.step_count - 1, last_record))
+            task = asyncio.create_task(
+                self.long_term_memory.add_step_to_replay(
+                    self.session_id, self.step_count - 1, last_record
+                )
+            )
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
-            
-        self.last_map_id = observation.state.context.get('map_id', -1)
+
+        self.last_map_id = observation.state.context.get("map_id", -1)
 
     async def close(self):
         if self._tasks:
-            for t in self._tasks: t.cancel()
+            for t in self._tasks:
+                t.cancel()
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
     def _handle_auto_pilot(self, map_id: int) -> Action:
@@ -126,13 +153,19 @@ class LLMBrain(Brain):
         else:
             btn = random.choice(["down", "right"])
         print(f"🤖 Auto-Pilot (Map #{map_id}): Pressing {btn.upper()}...")
-        return Action(button=btn, duration=15, reasoning=f"Auto-piloting through intro phase (Map {map_id}).")
+        return Action(
+            button=btn,
+            duration=15,
+            reasoning=f"Auto-piloting through intro phase (Map {map_id}).",
+        )
 
-    def _build_prompt(self, ctx: dict, observation: Observation, memories: str, external: str) -> str:
+    def _build_prompt(
+        self, ctx: dict, observation: Observation, memories: str, external: str
+    ) -> str:
         history_text = " -> ".join(self.history[-10:]) if self.history else "None"
-        map_id = ctx.get('map_id', 0)
+        map_id = ctx.get("map_id", 0)
         game_desc = self.config.description if self.config else "this game"
-        
+
         intro_guidance = ""
         if map_id == 0 and self.config and self.config.profile:
             intro_guidance = self.config.profile.intro_guidance
@@ -166,7 +199,7 @@ class LLMBrain(Brain):
         - 0xD163 = Party size
         - 0xD31C = Player money (3 bytes BCD)
         
-        OCR: "{observation.state.ocr_text or 'No text'}"
+        OCR: "{observation.state.ocr_text or "No text"}"
         
         TASK: Decide the next button press to advance the game.
         
@@ -178,12 +211,19 @@ class LLMBrain(Brain):
         }}
         """
 
-    async def _get_llm_action(self, prompt: str, observation: Observation, map_id: int) -> Action:
+    async def _get_llm_action(
+        self, prompt: str, observation: Observation, map_id: int
+    ) -> Action:
         print(f"⏳ AI Thinking (Map #{map_id})...")
-        
+
         content = [
             {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{observation.state.image_data}"}}
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{observation.state.image_data}"
+                },
+            },
         ]
 
         response_text = await self.client.acreate_completion(
@@ -191,7 +231,7 @@ class LLMBrain(Brain):
             messages=[{"role": "user", "content": content}],
             max_tokens=200,
             temperature=0.1,
-            timeout=30.0
+            timeout=30.0,
         )
 
         result = extract_json_from_llm_response(response_text)
@@ -200,13 +240,15 @@ class LLMBrain(Brain):
 
         button = str(result.get("button", "a")).lower().strip()
         reasoning = result.get("reasoning", "Thinking...")
-        
+
         # Update Internal State
         self.history.append(button.upper())
         self.summary = result.get("goal_immediate", "Progressing")
         self.last_outcome = f"Pressed {button.upper()}. {reasoning}"
-        
+
         print(f"🤖 AI Action: {button.upper().ljust(6)} | Goal: {self.summary[:50]}")
-        
-        duration = 15 if "text" in reasoning.lower() or "dialog" in reasoning.lower() else 5
+
+        duration = (
+            15 if "text" in reasoning.lower() or "dialog" in reasoning.lower() else 5
+        )
         return Action(button=button, duration=duration, reasoning=reasoning)

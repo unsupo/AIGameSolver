@@ -11,27 +11,40 @@ from autogameplayer.core.recording import RecordingSession
 from autogameplayer.server.input_manager import InputManager
 from autogameplayer.server.tick_manager import TickManager
 
+
 class GameSession:
     """Manages the lifecycle and state of a single game emulation session."""
-    def __init__(self, rom_path: str, vision_encoder: VisionEncoder = None, config: GameConfig = None):
+
+    def __init__(
+        self,
+        rom_path: str,
+        vision_encoder: VisionEncoder = None,
+        config: GameConfig = None,
+    ):
         self.rom_path = rom_path
         self.config = config
         self.lock = threading.Lock()
         self.running = True
-        
+
         # Injected Components
         self.vision_encoder = vision_encoder or VisionEncoder()
         self.context_extractor = get_extractor(config) if config else None
-        
+
         if self.context_extractor is None:
-            print("⚠️ WARNING: No context extractor loaded. AI will have no positional awareness.")
-            print("💡 Ensure 'profile_path' is set in your YAML and the profile contains RAM addresses.")
+            print(
+                "⚠️ WARNING: No context extractor loaded. AI will have no positional awareness."
+            )
+            print(
+                "💡 Ensure 'profile_path' is set in your YAML and the profile contains RAM addresses."
+            )
         else:
             print("✅ Context extractor loaded successfully.")
-            
-        self.obs_pipeline = ObservationPipeline(self.vision_encoder, self.context_extractor)
+
+        self.obs_pipeline = ObservationPipeline(
+            self.vision_encoder, self.context_extractor
+        )
         self.recording = RecordingSession()
-        
+
         # State
         self.guidance_message = ""
         self.current_plan = "Initializing strategic overseer..."
@@ -41,15 +54,15 @@ class GameSession:
 
         print(f"🎮 Initializing Emulator with ROM: {rom_path}...", flush=True)
         self.emulator = create_emulator(rom_path)
-        
+
         # Delegated Managers
         self.tick_manager = TickManager(self.emulator, self.lock)
         self.input_manager = InputManager(
-            self.emulator, 
-            self.obs_pipeline, 
-            self.recording, 
-            self.lock, 
-            get_tick_count=lambda: self.tick_manager.total_ticks
+            self.emulator,
+            self.obs_pipeline,
+            self.recording,
+            self.lock,
+            get_tick_count=lambda: self.tick_manager.total_ticks,
         )
 
     @property
@@ -84,9 +97,18 @@ class GameSession:
         state.recalled_memories = self.recalled_memories
         return state
 
-    def send_input(self, button: str, duration: int = 10, reasoning: str = "", repeat: int = 1, macro: list = None):
+    def send_input(
+        self,
+        button: str,
+        duration: int = 10,
+        reasoning: str = "",
+        repeat: int = 1,
+        macro: list = None,
+    ):
         """Queues a button press to be processed sequentially via InputManager."""
-        return self.input_manager.queue_input(button, duration, reasoning, repeat, macro)
+        return self.input_manager.queue_input(
+            button, duration, reasoning, repeat, macro
+        )
 
     def manage_checkpoint(self, action: str, slot: int):
         with self.lock:
@@ -99,7 +121,7 @@ class GameSession:
 
     def get_guidance(self) -> str:
         msg = self.guidance_message
-        self.guidance_message = "" 
+        self.guidance_message = ""
         return msg
 
     def set_plan(self, plan: str):

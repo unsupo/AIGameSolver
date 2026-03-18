@@ -17,6 +17,12 @@ dependencies = [
     "websockets>=16.0",
     "plotly>=6.6.0",
     "pandas>=2.3.3",
+    "openai>=2.26.0",
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+    "transformers>=5.3.0",
+    "streamlit>=1.55.0",
+    "pytest-asyncio>=1.3.0",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +36,7 @@ package = true
 
 [dependency-groups]
 dev = [
+    "pytest>=9.0.2",
     "ruff>=0.15.5",
 ]
 
@@ -39,5 +46,6 @@ pool = "autogameplayer.runner.parallel:main"
 train = "autogameplayer.core.trainer:main"
 run_autogame = "autogameplayer.runner.cli:main"
 rl_train = "autogameplayer.core.rl_trainer:main"
+muzero_train = "autogameplayer.muzero.trainer:main"
 llm_coach = "scripts.llm_coach:main"
 llm_play = "autogameplayer.runner.llm_turnkey:main"

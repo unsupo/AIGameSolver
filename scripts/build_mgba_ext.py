@@ -17,7 +17,7 @@ ffi.set_source(
 
 # We just declare the specific functions and struct pointers we need.
 # In API mode, CFFI parses this and generates C code that knows the exact layout.
-# We don't need to define the whole struct! We can just treat it as an opaque pointer if we only pass it around, 
+# We don't need to define the whole struct! We can just treat it as an opaque pointer if we only pass it around,
 # or we can define it partially and CFFI will use the C compiler's knowledge of the struct.
 # Wait, if we want to access fields, we define them. If we just call functions, opaque is fine!
 # BUT mGBA relies on function pointers INSIDE the struct: `core->runFrame(core)`.

@@ -12,23 +12,230 @@ from autogameplayer.core.models import GameState
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 
+def render_spatial_map(db_path, current_map_id):
+    """Renders a Trajectory and Collision Overlay using plotly.express."""
+    if not db_path.exists():
+        return None
+    try:
+        with sqlite3.connect(str(db_path), timeout=10) as conn:
+            # 1. Fetch Anchors (Trajectory)
+            df_anchors = pd.read_sql_query(
+                "SELECT x, y, timestamp, description FROM spatial_anchors WHERE map_id = ? ORDER BY timestamp ASC",
+                conn, params=(current_map_id,)
+            )
+            
+            # 2. Fetch Collisions from explored_locations
+            df_collisions = pd.read_sql_query(
+                "SELECT x, y, impassable_score FROM explored_locations WHERE map_id = ? AND impassable_score >= 0.5",
+                conn, params=(current_map_id,)
+            )
+
+            if df_anchors.empty and df_collisions.empty:
+                return None
+
+            fig = go.Figure()
+
+            # Layer 1: Path Trace (Lines between anchors)
+            if len(df_anchors) > 1:
+                fig.add_trace(go.Scatter(
+                    x=df_anchors["x"], y=df_anchors["y"],
+                    mode='lines+markers',
+                    line=dict(color='cyan', width=1),
+                    marker=dict(size=4, color='cyan'),
+                    name="Path Trace",
+                    hoverinfo='skip'
+                ))
+
+            # Layer 2: Anchors (Yellow Stars)
+            if not df_anchors.empty:
+                fig.add_trace(go.Scatter(
+                    x=df_anchors["x"], y=df_anchors["y"],
+                    mode='markers',
+                    marker=dict(symbol='star', color='yellow', size=10),
+                    text=df_anchors["description"],
+                    name="Discovery Anchor",
+                    hovertemplate="%{text}<extra></extra>"
+                ))
+            
+            # Layer 3: Collision Heatmap (Red intensity)
+            if not df_collisions.empty:
+                fig.add_trace(go.Scatter(
+                    x=df_collisions["x"],
+                    y=df_collisions["y"],
+                    mode='markers',
+                    marker=dict(
+                        symbol='x', 
+                        color='red', 
+                        size=8,
+                        opacity=0.6
+                    ),
+                    name="Physical Blocker",
+                    hovertemplate="Collision at (%{x}, %{y})<extra></extra>"
+                ))
+            
+            fig.update_layout(
+                title=f"🗺️ SLAM Frontier & Collision Zones (Map #{current_map_id})",
+                xaxis=dict(autorange=True, scaleanchor="y", scaleratio=1),
+                yaxis=dict(autorange="reversed"),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(l=10, r=10, t=40, b=10),
+                showlegend=False
+            )
+            return fig
+    except Exception as e:
+        logger.error(f"Error rendering spatial map: {e}")
+        return None
+
+
+def render_reward_attribution(db_path):
+    """Renders a pie chart showing which solvers are responsible for total reward."""
+    if not db_path.exists():
+        return None
+    try:
+        with sqlite3.connect(str(db_path), timeout=10) as conn:
+            df = pd.read_sql_query(
+                "SELECT solver_name, reward FROM replay_buffer WHERE reward > 0", 
+                conn
+            )
+            if df.empty:
+                return None
+            
+            # Aggregate rewards by solver
+            attribution = df.groupby("solver_name")["reward"].sum()
+            
+            fig = go.Figure(data=[go.Pie(
+                labels=attribution.index, 
+                values=attribution.values,
+                hole=.3,
+                textinfo='label+percent'
+            )])
+            
+            fig.update_layout(
+                title="🎯 Reward Attribution by Solver",
+                height=350,
+                margin=dict(l=10, r=10, t=40, b=10),
+                showlegend=False
+            )
+            return fig
+    except Exception:
+        return None
+
+
+def render_latent_space(db_path):
+    """Renders a PCA projection of recent hidden states."""
+    if not db_path.exists():
+        return None
+    try:
+        from sklearn.decomposition import PCA
+        import numpy as np
+        
+        with sqlite3.connect(str(db_path)) as conn:
+            df = pd.read_sql_query(
+                "SELECT hidden_state, reward FROM replay_buffer WHERE hidden_state IS NOT NULL ORDER BY id DESC LIMIT 200", 
+                conn
+            )
+            
+            if len(df) < 10:
+                return None
+                
+            latents = []
+            for b in df["hidden_state"]:
+                latents.append(np.frombuffer(b, dtype=np.float32))
+            
+            X = np.stack(latents)
+            pca = PCA(n_components=2)
+            X_2d = pca.fit_transform(X)
+            
+            fig = go.Figure(data=go.Scatter(
+                x=X_2d[:, 0], y=X_2d[:, 1],
+                mode='markers',
+                marker=dict(
+                    size=8,
+                    color=df["reward"],
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title="Reward")
+                ),
+                text=[f"Reward: {r:.2f}" for r in df["reward"]],
+                name="Hidden State"
+            ))
+            
+            fig.update_layout(
+                title="🧠 LSTM Hidden State Attractor (PCA)",
+                xaxis_title="PC1",
+                yaxis_title="PC2",
+                height=400,
+                margin=dict(l=10, r=10, t=40, b=10)
+            )
+            return fig
+    except Exception:
+        return None
+
+
+def render_rnd_tracking(db_path):
+    """Renders curiosity metrics: RND prediction error and intrinsic reward."""
+    if not db_path.exists():
+        return None
+    try:
+        with sqlite3.connect(str(db_path), timeout=10) as conn:
+            df = pd.read_sql_query(
+                "SELECT rnd_error, intrinsic_reward, timestamp FROM replay_buffer ORDER BY timestamp DESC LIMIT 200",
+                conn
+            )
+            if df.empty:
+                return None
+            
+            # Sort by timestamp for time-series display
+            df = df.iloc[::-1]
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit='s')
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=df["timestamp"], y=df["rnd_error"],
+                mode='lines', name="RND Error (Lifelong)",
+                line=dict(color='orange', width=2)
+            ))
+            fig.add_trace(go.Scatter(
+                x=df["timestamp"], y=df["intrinsic_reward"],
+                mode='lines', name="Intrinsic Reward (Final)",
+                line=dict(color='cyan', width=1, dash='dot')
+            ))
+            
+            fig.update_layout(
+                title="💡 Curiosity Trace (RND & Novelty)",
+                xaxis_title="Time",
+                yaxis_title="Value",
+                height=350,
+                margin=dict(l=10, r=10, t=40, b=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            return fig
+    except Exception:
+        return None
+
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 def fetch_capabilities(port):
     """Sync helper to fetch core capabilities once."""
     url = f"http://{settings.server_host}:{port}/sse"
+
     async def _fetch():
         async with sse_client(url) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 resp = await session.call_tool("get_capabilities")
                 return json.loads(resp.content[0].text)
+
     try:
         return asyncio.run(_fetch())
     except Exception:
         return None
+
 
 async def call_mcp_tool(port, tool_name, arguments=None):
     """Helper to call a single tool and return result."""
@@ -42,121 +249,148 @@ async def call_mcp_tool(port, tool_name, arguments=None):
     except Exception as e:
         return json.dumps({"error": str(e)})
 
-def render_spatial_grid(db_path, current_map_id, current_x, current_y, map_name="Current Area"):
-    """Renders a 2D Heatmap of the explored SLAM grid with impassable scores."""
+
+def render_transition_graph(db_path):
+    """Renders a simple bar chart of map transition frequency."""
     if not db_path.exists():
         return None
-        
     try:
-        # Normalize map_id to int if possible for DB query
-        try:
-            db_map_id = int(current_map_id)
-        except (ValueError, TypeError):
-            db_map_id = current_map_id
-
         with sqlite3.connect(str(db_path), timeout=10) as conn:
-            # Query x, y, impassable_score, is_warp.
-            if db_map_id == -1 or db_map_id is None:
+            query = """
+                SELECT metadata FROM memories 
+                WHERE type = 'warp' 
+                ORDER BY timestamp DESC LIMIT 50
+            """
+            cursor = conn.execute(query)
+            transitions = []
+            for row in cursor:
+                meta = json.loads(row[0])
+                transitions.append(f"{meta['from_map']} -> {meta['to_map']}")
+            
+            if not transitions:
                 return None
             
-            query = "SELECT x, y, impassable_score, is_warp FROM explored_locations WHERE map_id = ?"
+            counts = pd.Series(transitions).value_counts()
+            fig = go.Figure(data=[go.Bar(x=counts.index, y=counts.values, marker_color='rgb(158,202,225)')])
+            fig.update_layout(title="🌍 Map Transition Frequency", height=300, margin=dict(l=10, r=10, t=40, b=10))
+            return fig
+    except Exception:
+        return None
+
+def render_spatial_grid(
+    db_path, current_map_id, current_x, current_y, map_name="Current Area"
+):
+    """Renders a 2D Heatmap of the explored SLAM grid."""
+    if not db_path.exists():
+        return None
+
+    try:
+        db_map_id = int(current_map_id)
+        with sqlite3.connect(str(db_path), timeout=10) as conn:
+            query = "SELECT x, y, impassable_score, is_warp, visit_count FROM explored_locations WHERE map_id = ?"
             df = pd.read_sql_query(query, conn, params=(db_map_id,))
-            
+
             if df.empty:
                 return None
-                
-            # Create a pivot table for the heatmap using the float score
-            grid = df.pivot(index='y', columns='x', values='impassable_score').fillna(0)
-            
-            fig = go.Figure(data=go.Heatmap(
-                z=grid.values,
-                x=grid.columns,
-                y=grid.index,
-                colorscale=[[0, 'rgb(30,30,30)'], [0.5, 'rgb(255,165,0)'], [1, 'rgb(255,0,0)']],
-                showscale=True,
-                colorbar=dict(title="Blocked", tickvals=[0, 0.5, 1], ticktext=["0.0", "0.5", "1.0"]),
-                xgap=1, ygap=1,
-                zmin=0, zmax=1,
-                hovertemplate="X: %{x}<br>Y: %{y}<br>Score: %{z}<extra></extra>"
-            ))
 
-            # Overlay Warp Tiles (Purple)
-            warps = df[df['is_warp'] == 1]
+            grid = df.pivot(index="y", columns="x", values="visit_count").fillna(0)
+
+            fig = go.Figure(
+                data=go.Heatmap(
+                    z=grid.values,
+                    x=grid.columns,
+                    y=grid.index,
+                    colorscale=[[0, "rgb(20,20,20)"], [1, "rgb(0,100,255)"]],
+                    showscale=False,
+                    xgap=1,
+                    ygap=1,
+                    hovertemplate="X: %{x}<br>Y: %{y}<br>Visits: %{z}<extra></extra>",
+                )
+            )
+
+            collisions = df[df["impassable_score"] >= 0.5]
+            if not collisions.empty:
+                fig.add_trace(
+                    go.Scatter(
+                        x=collisions["x"],
+                        y=collisions["y"],
+                        mode="markers",
+                        marker=dict(size=8, color="red", symbol="x"),
+                        name="Collision",
+                    )
+                )
+
+            warps = df[df["is_warp"] == 1]
             if not warps.empty:
-                fig.add_trace(go.Scatter(
-                    x=warps['x'], y=warps['y'],
-                    mode='markers',
-                    marker=dict(size=10, color='purple', symbol='diamond', line=dict(width=1, color='white')),
-                    name='Warp Point',
-                    hovertemplate="Warp Point at (%{x}, %{y})<extra></extra>"
-                ))
-            
-            # Overlay Current Player Position
+                fig.add_trace(
+                    go.Scatter(
+                        x=warps["x"],
+                        y=warps["y"],
+                        mode="markers",
+                        marker=dict(size=10, color="purple", symbol="diamond"),
+                        name="Warp",
+                    )
+                )
+
             if current_x >= 0 and current_y >= 0:
-                fig.add_trace(go.Scatter(
-                    x=[current_x], y=[current_y],
-                    mode='markers',
-                    marker=dict(size=14, color='white', symbol='x', line=dict(width=2, color='black')),
-                    name='Player',
-                    hovertemplate="AI Player at (%{x}, %{y})<extra></extra>"
-                ))
-            
-            # Ensure the plot range covers at least a few tiles even if only 1 visited
-            x_min, x_max = min(grid.columns), max(grid.columns)
-            y_min, y_max = min(grid.index), max(grid.index)
-            
-            if x_min == x_max:
-                x_min -= 2
-                x_max += 2
-            if y_min == y_max:
-                y_min -= 2
-                y_max += 2
+                fig.add_trace(
+                    go.Scatter(
+                        x=[current_x],
+                        y=[current_y],
+                        mode="markers",
+                        marker=dict(size=14, color="white", symbol="cross"),
+                        name="Player",
+                    )
+                )
 
             fig.update_layout(
-                title=f"🗺️ {map_name} (Map #{current_map_id})",
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
+                title=f"🗺️ SLAM View: {map_name} (Map #{current_map_id})",
+                height=500,
+                xaxis=dict(autorange=True, scaleanchor="y", scaleratio=1),
+                yaxis=dict(autorange="reversed"),
+                showlegend=False,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
                 margin=dict(l=10, r=10, t=40, b=10),
-                height=450,
-                xaxis=dict(showgrid=False, zeroline=False, title="X Tile", range=[x_min-0.5, x_max+0.5]),
-                yaxis=dict(showgrid=False, zeroline=False, autorange='reversed', scaleanchor="x", scaleratio=1, title="Y Tile", range=[y_max+0.5, y_min-0.5]),
-                showlegend=False
             )
             return fig
     except Exception as e:
-        logger.error(f"Error rendering grid for map {current_map_id}: {e}")
+        logger.error(f"Grid error: {e}")
         return None
+
 
 def main():
     st.set_page_config(page_title="AGP Nexus Dashboard", layout="wide")
-    display_map_id = 0
-    
-    if 'supported_buttons' not in st.session_state:
+
+    if "supported_buttons" not in st.session_state:
         st.session_state.supported_buttons = ["up", "down", "left", "right", "a", "b", "start", "select"]
-    
-    if 'reasoning_steps' not in st.session_state:
+
+    if "reasoning_steps" not in st.session_state:
         st.session_state.reasoning_steps = deque(maxlen=5)
-    
-    if 'last_coords' not in st.session_state:
+
+    if "last_coords" not in st.session_state:
         st.session_state.last_coords = (0, 0)
-    
-    if 'collision_alert' not in st.session_state:
-        st.session_state.collision_alert = None
+
+    if "collision_history" not in st.session_state:
+        st.session_state.collision_history = deque(maxlen=60)
 
     st.sidebar.title("🎮 AGP Nexus")
-    worker_port = st.sidebar.number_input("Worker Port", min_value=8000, max_value=8100, value=settings.server_port, key="sidebar_port_input")
-    if st.sidebar.button("🔄 Sync Capabilities", key="sidebar_sync_btn"):
+    worker_port = st.sidebar.number_input(
+        "Worker Port",
+        min_value=8000,
+        max_value=8100,
+        value=settings.server_port,
+        key="sidebar_port_input",
+    )
+
+    if st.sidebar.button("🔄 Sync Capabilities"):
         caps = fetch_capabilities(worker_port)
         if caps:
-            st.session_state.supported_buttons = caps.get('supported_buttons', [])
+            st.session_state.supported_buttons = caps.get("supported_buttons", [])
             st.rerun()
-            
-    if st.sidebar.button("🧹 Clear UI Cache"):
-        st.session_state.clear()
-        st.rerun()
 
-    include_ocr = st.sidebar.checkbox("Enable OCR (Slow Path)", value=False, key="sidebar_ocr_toggle")
-    follow_player = st.sidebar.checkbox("Follow Player", value=True, key="sidebar_follow_player")
+    include_ocr = st.sidebar.checkbox("Enable OCR (Slow Path)", value=False)
+    st.sidebar.checkbox("Follow Player", value=True)
 
     st.sidebar.header("🕹️ Controller")
     btns = st.session_state.supported_buttons
@@ -164,8 +398,8 @@ def main():
     actions = [b for b in btns if b not in dirs]
 
     c1, c2, c3 = st.sidebar.columns(3)
-    with c2: 
-        if "up" in dirs and st.button("⬆️", key="btn_up"): 
+    with c2:
+        if "up" in dirs and st.button("⬆️", key="btn_up"):
             asyncio.run(call_mcp_tool(worker_port, "send_input", {"button": "up"}))
     c1, c2, c3 = st.sidebar.columns(3)
     with c1:
@@ -185,87 +419,145 @@ def main():
             if st.button(f"[{btn.upper()}]", key=f"btn_{btn}"):
                 asyncio.run(call_mcp_tool(worker_port, "send_input", {"button": btn}))
 
-    st.sidebar.header("💬 AI Guidance")
-    user_msg = st.sidebar.text_input("Instruction", placeholder="e.g. Go to the PokeCenter", key="sidebar_guidance_input")
-    if st.sidebar.button("Send Guidance", key="sidebar_send_guidance_btn"):
-        asyncio.run(call_mcp_tool(worker_port, "set_guidance", {"message": user_msg}))
-
     st.header("📺 Universal Game Nexus")
-    
-    tab_live, tab_kb = st.tabs(["🎮 Live Session", "🧠 Knowledge Base"])
+
+    tab_live, tab_kb, tab_bandit, tab_curriculum = st.tabs(["🎮 Live Session", "🧠 Knowledge Base", "📈 Agent57 Bandit", "📚 Curriculum"])
+
+    with tab_curriculum:
+        st.header("Adaptive Curriculum Progress")
+        st.info("Curriculum tracking active. Stage transitions are logged to the console.")
+        
+        stage = st.session_state.get("curriculum_stage", 0)
+        st.metric("Current Stage", stage)
+
+    with tab_bandit:
+        st.header("Agent57 Meta-Controller (Bandit)")
+        bandit_db = settings.models_dir / "bandit_stats.db"
+        if bandit_db.exists():
+            try:
+                with sqlite3.connect(str(bandit_db)) as conn:
+                    df_bandit = pd.read_sql_query("SELECT arm_id, reward, timestamp FROM bandit_stats ORDER BY timestamp DESC LIMIT 500", conn)
+                    if not df_bandit.empty:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.subheader("Arm Selection Frequency")
+                            st.bar_chart(df_bandit["arm_id"].value_counts().sort_index())
+                        with col2:
+                            st.subheader("Avg Reward per Arm")
+                            st.bar_chart(df_bandit.groupby("arm_id")["reward"].mean().sort_index())
+                        st.subheader("Recent Arm Performance Trace")
+                        df_bandit["timestamp"] = pd.to_datetime(df_bandit["timestamp"])
+                        st.line_chart(df_bandit.set_index("timestamp")["reward"])
+                    else:
+                        st.info("No bandit history recorded yet.")
+            except Exception as e:
+                st.error(f"Error reading bandit stats: {e}")
+        else:
+            st.info("📉 Bandit database not found. This tab will populate once the agent starts completing training episodes.")
 
     with tab_live:
         col_main, col_stats = st.columns([2, 1])
-        
+
         with col_main:
             # --- VIDEO FEED ---
             ws_port = worker_port + 100
-            st.components.v1.html(f"""
-                <div id="game-container" style="background: #000; padding: 10px; border-radius: 8px; text-align: center; box-sizing: border-box;">
-                    <canvas id="game-canvas" width="240" height="160" style="width: 100%; height: auto; max-width: 800px; max-height: 650px; image-rendering: pixelated; border: 2px solid #333; display: block; margin: auto;"></canvas>
+            st.components.v1.html(
+                f"""
+                <style>
+                    body {{ margin: 0; padding: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; width: 100vw; }}
+                    #game-container {{
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        width: 100%;
+                        height: 100%;
+                    }}
+                    #game-canvas {{
+                        width: 100%;
+                        height: 100%;
+                        max-width: 100vw;
+                        max-height: 100vh;
+                        object-fit: contain;
+                        image-rendering: pixelated;
+                        image-rendering: crisp-edges;
+                        border: 2px solid #333;
+                        border-radius: 4px;
+                    }}
+                </style>
+                <div id="game-container">
+                    <canvas id="game-canvas"></canvas>
                 </div>
                 <script>
                     const canvas = document.getElementById('game-canvas');
                     const ctx = canvas.getContext('2d');
-                    ctx.imageSmoothingEnabled = false;
                     function connect() {{
                         const ws = new WebSocket('ws://127.0.0.1:{ws_port}');
                         ws.onmessage = (e) => {{
                             const data = JSON.parse(e.data);
-                            if (data.type === 'frame') {{
-                                if (data.width && data.height && (canvas.width !== data.width || canvas.height !== data.height)) {{
-                                    canvas.width = data.width;
-                                    canvas.height = data.height;
-                                    ctx.imageSmoothingEnabled = false;
+                            const img = new Image();
+                            img.onload = () => {{
+                                if (canvas.width !== img.width || canvas.height !== img.height) {{
+                                    canvas.width = img.width;
+                                    canvas.height = img.height;
                                 }}
-                                const img = new Image();
-                                img.onload = () => ctx.drawImage(img, 0, 0);
-                                img.src = 'data:image/jpeg;base64,' + data.data;
-                            }}
+                                ctx.drawImage(img, 0, 0);
+                            }};
+                            img.src = 'data:image/jpeg;base64,' + data.data;
                         }};
                         ws.onclose = () => setTimeout(connect, 2000);
                     }}
                     connect();
                 </script>
-            """, height=600)
-            
+            """,
+                height=650,
+            )
+
             # --- SPATIAL MEMORY ---
             st.divider()
-            st.subheader("🗺️ Spatial Memory (SLAM)")
-            grid_chart = st.empty()
+            t_col1, t_col2 = st.columns([1, 2])
+            with t_col1:
+                st.subheader("🌍 Map Transitions")
+                transition_chart = st.empty()
+            with t_col2:
+                st.subheader("🗺️ SLAM View")
+                grid_chart = st.empty()
             
-            st.subheader("📊 Vision Latent Space")
-            vector_chart = st.empty()
+            st.subheader("📍 SLAM Frontier & Collision Zones")
+            frontier_chart = st.empty()
+
+            st.subheader("📊 Model Performance")
+            st.subheader("🧠 Latent Space Analysis (PCA)")
+            latent_chart = st.empty()
+
+            st.subheader("🎯 Reward Attribution")
+            attribution_chart = st.empty()
+
+            st.subheader("💡 Curiosity Tracking")
+            rnd_chart = st.empty()
 
         with col_stats:
             # --- BRAIN STREAM ---
             st.subheader("🧠 Brain Stream")
             action_info = st.empty()
-            st.write("**Recent Reasoning Steps**")
-            reasoning_history_table = st.empty()
-            
+
             st.divider()
-            st.subheader("👁️ AI Perception")
+            st.subheader("📝 Long-Horizon Reasoning")
+            reasoning_log = st.empty()
+
+            st.divider()
+            st.subheader("👁️ Perception & Status")
             ocr_box = st.empty()
-            st.subheader("📍 Live Status")
             status_box = st.empty()
-            
-            st.divider()
-            st.subheader("📚 Knowledge Retrieval (RAG)")
-            rag_box = st.empty()
-            
+
             st.divider()
             st.subheader("🚗 Motion Delta (Odometer)")
             m_col1, m_col2 = st.columns(2)
             dx_metric = m_col1.empty()
             dy_metric = m_col2.empty()
-            collision_box = st.empty()
 
     with tab_kb:
-        st.header("Pluggable Knowledge Base")
+        st.header("Knowledge Base")
         db_path = settings.models_dir / "long_term_memory.db"
-        
-        # --- ROW 1: DISCOVERY & STATS ---
         k_col1, k_col2 = st.columns(2)
         with k_col1:
             st.subheader("📍 Discovered RAM Map")
@@ -273,232 +565,91 @@ def main():
             if ram_path.exists():
                 with open(ram_path, "r") as f:
                     st.json(json.load(f))
-            else:
-                st.info("No RAM addresses discovered yet.")
-
         with k_col2:
             st.subheader("🌍 Global Progress")
             if db_path.exists():
                 try:
-                    with sqlite3.connect(str(db_path), timeout=10) as conn:
-                        # 1. Total Tiles Explored
+                    with sqlite3.connect(str(db_path)) as conn:
                         cursor = conn.execute("SELECT COUNT(*) FROM explored_locations")
                         total_tiles = cursor.fetchone()[0]
                         st.metric("Total Unique Tiles Explored", total_tiles)
                         
-                        # 2. Frequent Stuck Points
-                        st.write("**Top Stuck Points (by vision hash)**")
-                        cursor = conn.execute("SELECT vision_hash, count FROM stuck_hashes ORDER BY count DESC LIMIT 3")
-                        stuck_rows = cursor.fetchall()
-                        if stuck_rows:
-                            st.table([{"Hash": r[0], "Seen Count": r[1]} for r in stuck_rows])
-                        else:
-                            st.info("No persistent stuck points recorded.")
-                except Exception as e:
-                    st.error(f"Error reading stats: {e}")
-            else:
-                st.info("No database found for stats.")
-
-        st.divider()
-
-        # --- ROW 2: SKILLS ---
-        st.subheader("✨ Visual Skill Registry (Macros)")
-        if db_path.exists():
-            try:
-                with sqlite3.connect(str(db_path), timeout=10) as conn:
-                    conn.row_factory = sqlite3.Row
-                    cursor = conn.execute("SELECT name, description, macro_json, score, reliability, times_run, is_hierarchical FROM skills ORDER BY (reliability * score) DESC")
-                    rows = cursor.fetchall()
-                    
-                    if rows:
-                        display_reg = []
-                        for r in rows:
-                            display_reg.append({
-                                "Name": r["name"] or "Pending...",
-                                "Type": "🧩 Hierarchical" if r["is_hierarchical"] else "⚡ Flat",
-                                "Description": r["description"],
-                                "Macro": r["macro_json"],
-                                "Reliability": f"{r['reliability']:.2f}",
-                                "Runs": r["times_run"],
-                                "Score": f"{r['score']:.2f}"
-                            })
-                        st.table(display_reg)
-                    else:
-                        st.info("No skills distilled into the database yet.")
-            except Exception as e:
-                st.error(f"Error reading skills: {e}")
-
-        st.divider()
-
-        # --- ROW 3: RECENT EXPERIENCES ---
-        st.subheader("🎞️ Recent Replays")
-        if db_path.exists():
-            try:
-                with sqlite3.connect(str(db_path), timeout=10) as conn:
-                    conn.row_factory = sqlite3.Row
-                    cursor = conn.execute("SELECT step_index, map_id, coords, button, reward, reasoning FROM replay_buffer ORDER BY id DESC LIMIT 10")
-                    replays = cursor.fetchall()
-                    if replays:
-                        st.table([dict(r) for r in replays])
-                    else:
-                        st.info("Replay buffer is empty.")
-            except Exception as e:
-                st.error(f"Error reading replays: {e}")
-        else:
-            st.info("Database not initialized yet.")
-
-    # Fetch initial map list for sidebar selection
-    map_list = {0: "Intro/Naming"}
-    if db_path.exists():
-        try:
-            with sqlite3.connect(str(db_path), timeout=10) as conn:
-                cursor = conn.execute("SELECT DISTINCT map_id FROM explored_locations")
-                for row in cursor:
-                    mid = row[0]
-                    if mid not in map_list:
-                        map_list[mid] = f"Map #{mid}"
-        except Exception:
-            pass
-
-    st.sidebar.divider()
-    if db_path.exists():
-        try:
-            with sqlite3.connect(str(db_path), timeout=10) as conn:
-                # Basic diagnostic: show tile count for player's current map
-                # (We don't have display_map_id here yet, so we'll skip the sidebar metric for now or make it global)
-                cursor = conn.execute("SELECT COUNT(*) FROM explored_locations")
-                total_tiles = cursor.fetchone()[0]
-                st.sidebar.write(f"🗺️ Total Tiles in DB: {total_tiles}")
-        except Exception:
-            pass
-
-    view_map_id = st.sidebar.selectbox("🗺️ Select Grid View", options=list(map_list.keys()), format_func=lambda x: map_list[x], key="sidebar_map_selector")
+                        st.divider()
+                        st.subheader("📦 Replay Buffer Health")
+                        cursor = conn.execute("SELECT COUNT(*), AVG(reward), AVG(priority) FROM replay_buffer")
+                        count, avg_reward, avg_priority = cursor.fetchone()
+                        
+                        st.metric("Total Steps in Buffer", count)
+                        
+                        c1, c2 = st.columns(2)
+                        c1.metric("Avg Reward", f"{avg_reward:.4f}")
+                        c2.metric("Avg PER Priority", f"{avg_priority:.2f}")
+                        
+                        # Reward Distribution
+                        df_rewards = pd.read_sql_query("SELECT reward FROM replay_buffer ORDER BY timestamp DESC LIMIT 1000", conn)
+                        if not df_rewards.empty:
+                            st.write("**Recent Reward Distribution**")
+                            st.bar_chart(df_rewards["reward"].value_counts().sort_index())
+                except Exception:
+                    pass
 
     # --- FRAGMENTED UPDATE LOOP ---
     @st.fragment(run_every=0.5)
     def update_pass():
-        # Re-fetch map list to see new discoveries (Only occasionally or inside fragment)
-        try:
-            with sqlite3.connect(str(db_path), timeout=10) as conn:
-                cursor = conn.execute("SELECT DISTINCT map_id FROM explored_locations")
-                for row in cursor:
-                    mid = row[0]
-                    if mid not in map_list:
-                        map_list[mid] = f"Map #{mid}"
-        except Exception: pass
-
         try:
             state_json = asyncio.run(call_mcp_tool(worker_port, "get_game_state", {"include_ocr": include_ocr}))
-            
-            if "error" in state_json and len(state_json) < 500:
-                try:
-                    err_data = json.loads(state_json)
-                    if "error" in err_data:
-                        status_box.warning(f"Connecting to Game Server... ({err_data['error'][:30]})")
-                        return
-                except Exception: return
-
             state_data = GameState.model_validate_json(state_json)
-
-            # --- UPDATE UI ELEMENTS ---
-            if state_data.last_action:
-                plan_text = f"🎯 **Plan:** {state_data.current_plan}\n\n" if state_data.current_plan else ""
-                repeat_suffix = f" (x{state_data.context.get('last_repeat', 1)})" if state_data.context.get('last_repeat', 1) > 1 else ""
-                reasoning = state_data.last_reasoning or "Thinking..."
-                action_info.info(f"{plan_text}🤖 **Action:** {state_data.last_action.upper()}{repeat_suffix}")
-
-                # Update reasoning history
-                current_entry = {"Action": state_data.last_action.upper(), "Reasoning": reasoning}
-                if not st.session_state.reasoning_steps or st.session_state.reasoning_steps[-1] != current_entry:
-                    st.session_state.reasoning_steps.append(current_entry)
-
-                reasoning_history_table.table(list(st.session_state.reasoning_steps)[::-1])
-            else:
-                action_info.write("⏳ Waiting for AI to take action...")
 
             if state_data.context:
                 ctx = state_data.context
-                ui_state = ctx.get('interface_mode', 'UNKNOWN')
-                curr_map_id = ctx.get('map_id', 0)
-                
-                try:
-                    display_map_id = int(curr_map_id)
-                except (ValueError, TypeError):
-                    display_map_id = curr_map_id
-
-                curr_x, curr_y = ctx.get('x', 0), ctx.get('y', 0)
+                curr_map_id = ctx.get("map_id", 0)
+                curr_x, curr_y = ctx.get("x", 0), ctx.get("y", 0)
                 last_x, last_y = st.session_state.last_coords
-                
-                dx = curr_x - last_x
-                dy = curr_y - last_y
-                
-                # Collision Detection (Odometer)
-                last_btn = state_data.last_action.lower() if state_data.last_action else ""
-                collision = False
-                if last_btn == "up" and dy >= 0:
-                    collision = True
-                elif last_btn == "down" and dy <= 0:
-                    collision = True
-                elif last_btn == "left" and dx >= 0:
-                    collision = True
-                elif last_btn == "right" and dx <= 0:
-                    collision = True
-                
-                if last_btn not in ["up", "down", "left", "right"]:
-                    collision = False
-                if ui_state != "EXPLORABLE (Overworld)":
-                    collision = False
-                
-                dx_metric.metric("Delta X", dx, delta_color="normal" if not collision else "inverse")
-                dy_metric.metric("Delta Y", dy, delta_color="normal" if not collision else "inverse")
-                
-                if collision:
-                    collision_box.error(f"🚨 Collision at ({curr_x}, {curr_y})!")
-                else:
-                    collision_box.empty()
-                
+                dx, dy = curr_x - last_x, curr_y - last_y
+
+                dx_metric.metric("Delta X", dx)
+                dy_metric.metric("Delta Y", dy)
                 st.session_state.last_coords = (curr_x, curr_y)
-                
-                s_text = f"**Map:** #{curr_map_id} | **X:** {curr_x} | **Y:** {curr_y}\n\n"
-                s_text += f"**HP:** {ctx.get('hp')} | **State:** {ui_state}"
-                status_box.write(s_text)
 
-                if state_data.ocr_text:
-                    ocr_box.info(f"**OCR:** {state_data.ocr_text}")
-                else:
-                    ocr_box.write("🗨️ No dialogue text detected.")
+                status_box.write(f"**Map:** #{curr_map_id} | **X:** {curr_x} | **Y:** {curr_y}")
+                ocr_box.info(f"**OCR:** {state_data.ocr_text or 'None'}")
 
-                # Update RAG Retrieval Box
-                if state_data.recalled_memories:
-                    rag_text = "**Top Recalled Context:**\n\n"
-                    for mem in state_data.recalled_memories[:3]:
-                        rag_text += f"- {mem[:200]}...\n"
-                    rag_box.info(rag_text)
-                else:
-                    rag_box.write("📖 Waiting for active knowledge retrieval...")
-
-                # Render SLAM Grid
-                grid_map_id = display_map_id if follow_player else view_map_id
-                map_name = map_list.get(grid_map_id, f"Map #{grid_map_id}")
+                # Render Visualizations
+                grid_map_id = curr_map_id
                 
-                player_x = curr_x if grid_map_id == display_map_id else -100
-                player_y = curr_y if grid_map_id == display_map_id else -100
-                
-                grid_fig = render_spatial_grid(db_path, grid_map_id, player_x, player_y, map_name=map_name)
+                grid_fig = render_spatial_grid(db_path, grid_map_id, curr_x, curr_y)
                 if grid_fig:
-                    grid_chart.plotly_chart(grid_fig, use_container_width=True, key="live_exploration_heatmap")
-                else:
-                    grid_chart.info(f"No exploration data for {map_name}.")
+                    grid_chart.plotly_chart(grid_fig, use_container_width=True)
+                
+                t_fig = render_transition_graph(db_path)
+                if t_fig:
+                    transition_chart.plotly_chart(t_fig, use_container_width=True)
+                
+                f_fig = render_spatial_map(db_path, grid_map_id)
+                if f_fig:
+                    frontier_chart.plotly_chart(f_fig, use_container_width=True)
+                
+                l_fig = render_latent_space(db_path)
+                if l_fig:
+                    latent_chart.plotly_chart(l_fig, use_container_width=True)
+                
+                a_fig = render_reward_attribution(db_path)
+                if a_fig:
+                    attribution_chart.plotly_chart(a_fig, use_container_width=True)
+                
+                r_fig = render_rnd_tracking(db_path)
+                if r_fig:
+                    rnd_chart.plotly_chart(r_fig, use_container_width=True)
 
-            if state_data.vision_vector:
-                vector_chart.line_chart(state_data.vision_vector)
-            else:
-                vector_chart.write("📊 Vision Encoder disabled or warming up...")        
+            if state_data.last_action:
+                action_info.info(f"🤖 **Action:** {state_data.last_action.upper()}")
+                reasoning_log.info(f"💬 {state_data.last_reasoning or 'Thinking...'}")
+
         except Exception as e:
             status_box.warning(f"Searching for Game Server... ({str(e)[:50]})")
 
-    # Start the fragment loop
     update_pass()
+
 
 if __name__ == "__main__":
     main()

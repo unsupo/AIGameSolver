@@ -10,7 +10,7 @@ from functools import wraps
 
 
 def find(path):
-    core = lib.mCoreFind(path.encode('UTF-8'))
+    core = lib.mCoreFind(path.encode("UTF-8"))
     if core == ffi.NULL:
         return None
     return Core._init(core)
@@ -43,6 +43,7 @@ def needs_reset(func):
         if not self._was_reset:
             raise RuntimeError("Core must be reset first")
         return func(self, *args, **kwargs)
+
     return wrapper
 
 
@@ -52,6 +53,7 @@ def protected(func):
         if self._protected:
             raise RuntimeError("Core is protected")
         return func(self, *args, **kwargs)
+
     return wrapper
 
 
@@ -117,10 +119,10 @@ class CoreCallbacks(object):
 
 
 class Core(object):
-    if hasattr(lib, 'mPLATFORM_GBA'):
+    if hasattr(lib, "mPLATFORM_GBA"):
         PLATFORM_GBA = lib.mPLATFORM_GBA
 
-    if hasattr(lib, 'mPLATFORM_GB'):
+    if hasattr(lib, "mPLATFORM_GB"):
         PLATFORM_GB = lib.mPLATFORM_GB
 
     def __init__(self, native):
@@ -167,11 +169,13 @@ class Core(object):
 
     @classmethod
     def _detect(cls, core):
-        if hasattr(cls, 'PLATFORM_GBA') and core.platform(core) == cls.PLATFORM_GBA:
+        if hasattr(cls, "PLATFORM_GBA") and core.platform(core) == cls.PLATFORM_GBA:
             from .gba import GBA
+
             return GBA(core)
-        if hasattr(cls, 'PLATFORM_GB') and core.platform(core) == cls.PLATFORM_GB:
+        if hasattr(cls, "PLATFORM_GB") and core.platform(core) == cls.PLATFORM_GB:
             from .gb import GB
+
             return GB(core)
         return Core(core)
 
@@ -180,7 +184,7 @@ class Core(object):
 
     @protected
     def load_file(self, path):
-        return bool(lib.mCoreLoadFile(self._core, path.encode('UTF-8')))
+        return bool(lib.mCoreLoadFile(self._core, path.encode("UTF-8")))
 
     def is_rom(self, vfile):
         return bool(self._core.isROM(vfile.handle))
@@ -272,7 +276,7 @@ class Core(object):
     @needs_reset
     @protected
     def save_raw_state(self):
-        state = ffi.new('unsigned char[%i]' % self._core.stateSize(self._core))
+        state = ffi.new("unsigned char[%i]" % self._core.stateSize(self._core))
         if self._core.saveState(self._core, state):
             return state
         return None
@@ -280,8 +284,8 @@ class Core(object):
     @staticmethod
     def _keys_to_int(*args, **kwargs):
         keys = 0
-        if 'raw' in kwargs:
-            keys = kwargs['raw']
+        if "raw" in kwargs:
+            keys = kwargs["raw"]
         for key in args:
             keys |= 1 << key
         return keys
@@ -379,10 +383,16 @@ class Config(object):
         for key, value in defaults.items():
             if isinstance(value, bool):
                 value = int(value)
-            lib.mCoreConfigSetDefaultValue(self._native, ffi.new("char[]", key.encode("UTF-8")), ffi.new("char[]", str(value).encode("UTF-8")))
+            lib.mCoreConfigSetDefaultValue(
+                self._native,
+                ffi.new("char[]", key.encode("UTF-8")),
+                ffi.new("char[]", str(value).encode("UTF-8")),
+            )
 
     def __getitem__(self, key):
-        string = lib.mCoreConfigGetValue(self._native, ffi.new("char[]", key.encode("UTF-8")))
+        string = lib.mCoreConfigGetValue(
+            self._native, ffi.new("char[]", key.encode("UTF-8"))
+        )
         if not string:
             return None
         return ffi.string(string)
@@ -390,4 +400,8 @@ class Config(object):
     def __setitem__(self, key, value):
         if isinstance(value, bool):
             value = int(value)
-        lib.mCoreConfigSetValue(self._native, ffi.new("char[]", key.encode("UTF-8")), ffi.new("char[]", str(value).encode("UTF-8")))
+        lib.mCoreConfigSetValue(
+            self._native,
+            ffi.new("char[]", key.encode("UTF-8")),
+            ffi.new("char[]", str(value).encode("UTF-8")),
+        )

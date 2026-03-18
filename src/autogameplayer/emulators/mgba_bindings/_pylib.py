@@ -30,7 +30,7 @@ ffi.cdef("""
     };
 """)
 
-import ctypes.util
+import ctypes.util  # noqa: E402
 
 lib_path = os.environ.get("LIBMGBA_PATH")
 if not lib_path:
@@ -40,7 +40,7 @@ if not lib_path:
     fallbacks = [
         "/opt/homebrew/opt/mgba/lib/libmgba.dylib",
         "/usr/local/lib/libmgba.so",
-        "libmgba.so"
+        "libmgba.so",
     ]
     for p in fallbacks:
         if os.path.exists(p):
@@ -48,6 +48,8 @@ if not lib_path:
             break
 
 if not lib_path:
-    raise ImportError("Could not find libmgba. Please set LIBMGBA_PATH or install mgba.")
+    raise ImportError(
+        "Could not find libmgba. Please set LIBMGBA_PATH or install mgba."
+    )
 
 lib = ffi.dlopen(lib_path)

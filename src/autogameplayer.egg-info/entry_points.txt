@@ -1,6 +1,7 @@
 [console_scripts]
 llm_coach = scripts.llm_coach:main
 llm_play = autogameplayer.runner.llm_turnkey:main
+muzero_train = autogameplayer.muzero.trainer:main
 nexus = autogameplayer.runner.single:main
 pool = autogameplayer.runner.parallel:main
 rl_train = autogameplayer.core.rl_trainer:main

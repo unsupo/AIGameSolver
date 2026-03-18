@@ -1,5 +1,11 @@
 from typing import Dict, Type
-from autogameplayer.core.interfaces import Brain, RewardFunction, Controller, BaseEmulator
+from autogameplayer.core.interfaces import (
+    Brain,
+    RewardFunction,
+    Controller,
+    BaseEmulator,
+)
+
 
 class Registry:
     _BRAINS: Dict[str, Type[Brain]] = {}
@@ -12,6 +18,7 @@ class Registry:
         def decorator(subclass):
             cls._BRAINS[name] = subclass
             return subclass
+
         return decorator
 
     @classmethod
@@ -19,6 +26,7 @@ class Registry:
         def decorator(subclass):
             cls._REWARDS[name] = subclass
             return subclass
+
         return decorator
 
     @classmethod
@@ -26,6 +34,7 @@ class Registry:
         def decorator(subclass):
             cls._CONTROLLERS[name] = subclass
             return subclass
+
         return decorator
 
     @classmethod
@@ -34,18 +43,23 @@ class Registry:
             for ext in extensions:
                 cls._EMULATORS[ext.lower()] = subclass
             return subclass
+
         return decorator
 
     @classmethod
     def create_brain(cls, name: str, controller: Controller, **kwargs) -> Brain:
         if name not in cls._BRAINS:
-            raise ValueError(f"Brain '{name}' not found in registry. Available: {list(cls._BRAINS.keys())}")
+            raise ValueError(
+                f"Brain '{name}' not found in registry. Available: {list(cls._BRAINS.keys())}"
+            )
         return cls._BRAINS[name](controller, **kwargs)
 
     @classmethod
     def create_reward(cls, name: str, **kwargs) -> RewardFunction:
         if name not in cls._REWARDS:
-            raise ValueError(f"Reward '{name}' not found in registry. Available: {list(cls._REWARDS.keys())}")
+            raise ValueError(
+                f"Reward '{name}' not found in registry. Available: {list(cls._REWARDS.keys())}"
+            )
         return cls._REWARDS[name](**kwargs)
 
     @classmethod
@@ -58,13 +72,36 @@ class Registry:
     @classmethod
     def create_emulator(cls, rom_path: str) -> BaseEmulator:
         import os
+
         ext = os.path.splitext(rom_path)[1].lower()
         if ext not in cls._EMULATORS:
             # Fallback to common extensions if unknown
             fallback_ext = ".gb" if ".gb" in cls._EMULATORS else ".gba"
             if fallback_ext in cls._EMULATORS:
-                print(f"⚠️ Unknown extension '{ext}'. Falling back to {fallback_ext} emulator.")
+                print(
+                    f"⚠️ Unknown extension '{ext}'. Falling back to {fallback_ext} emulator."
+                )
                 return cls._EMULATORS[fallback_ext](rom_path)
-            
-            raise ValueError(f"No emulator found for extension '{ext}'. Available: {list(cls._EMULATORS.keys())}")
+
+            raise ValueError(
+                f"No emulator found for extension '{ext}'. Available: {list(cls._EMULATORS.keys())}"
+            )
         return cls._EMULATORS[ext](rom_path)
+
+    @classmethod
+    def get_brain_genome_size(cls, name: str, controller: Controller, **kwargs) -> int:
+        """Asks a brain class for its required genome size for evolution."""
+        if name not in cls._BRAINS:
+            return 0
+        brain_cls = cls._BRAINS[name]
+        if hasattr(brain_cls, "get_genome_size"):
+            return brain_cls.get_genome_size(controller, **kwargs)
+
+        # Default legacy fallback: Linear layer (input_dim * output_size)
+        input_dim = kwargs.get("input_dim")
+        if input_dim is None:
+            from autogameplayer.core.config import settings
+            from autogameplayer.vision.encoder import VisionEncoder
+            input_dim = VisionEncoder.get_dim(settings.vision_model)
+            
+        return input_dim * len(controller.buttons)

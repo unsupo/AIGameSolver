@@ -1,5 +1,5 @@
-from . import exploration
-from . import dialogue
-from . import ocr
-from . import pokemon
-from . import curiosity
+from . import exploration as exploration
+from . import dialogue as dialogue
+from . import ocr as ocr
+from . import ram_tracker as ram_tracker
+from . import curiosity as curiosity

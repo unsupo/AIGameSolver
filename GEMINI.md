@@ -21,6 +21,8 @@ Dry and solid focus on agnostic architecture with a huge focus on turn-key autom
 
 ### 4. Stuck Detection & Stagnation Response
 - **Spatial Stagnation:** A "stuck" state is defined by **20 consecutive steps** where the `map_id` and `(x, y)` coordinates remain identical, regardless of frame hash changes.
+- **Reward Normalization:** The `RewardNormalizer` is the **single source of truth** for intrinsic vs extrinsic weighting, curiosity bursts, and stagnation penalties.
+- **Mandatory Reset:** Every `RewardFunction` implementation MUST implement `reset()` to clear per-episode state (seen hashes, OCR keywords, stagnation counters). The environment MUST call `reset()` on all reward functions at the start of every episode to prevent inter-episode reward drift.
 - **Timeline Branching:** If the stagnation counter reaches **30 steps**, the AI MUST force-load a recent rolling slot (or Slot 1 as fallback) and enter Drift Mode.
 - **Visual Stagnation:** If visual/OCR progress is effectively zero for 5 steps, the AI is marked as stuck.
 - **Loop Avoidance:** If the `CriticAgent` detects a state loop (same tile/OCR repeated > 3 times in 8 steps), it MUST trigger an immediate plan invalidation and record a `loop_warning` memory.
@@ -71,6 +73,13 @@ Dry and solid focus on agnostic architecture with a huge focus on turn-key autom
 
 ## 🛠️ Technical Implementation Guards
 - **Syntax Verification:** Every time code is modified, the system MUST run `uv run ruff check . --fix` to ensure syntax integrity and style consistency. If errors remain, they MUST be resolved manually before completing the task.
+- **Robust Schema Parsing:** All Pydantic models related to configuration (`GameConfig`, `GameProfile`) and core data (`GameState`, `Action`, `Observation`) MUST include `model_config = {"extra": "allow"}`. This prevents system crashes when schemas evolve or extra metadata is enriched by sub-agents.
+- **Robust MCP Communication:** 
+    - All MCP tools returning complex objects MUST return a `dict` (via `model_dump()`) and use `Any` as the return type hint. This bypasses fragile FastMCP internal auto-serialization which can return error strings on failure.
+    - All MCP tools MUST accept an optional `_seq: int = None` parameter to support the client's idempotency tracking.
+- **Telemetry & Attribution:**
+    - Every `ActionProposal` MUST include a `source` string (or `solver_name` in metadata).
+    - `SessionOrchestrator` MUST log reward attribution by solver to allow the dashboard to render attribution pie charts.
 - **Scope Safety:** Always initialize method-level variables (like `macro_json`, `description`) at the top of async methods. NEVER use `if 'var' in locals()` as it is fragile in asynchronous contexts.
 - **Multimodal Default:** Always include game screenshots in the LLM prompt for all models unless they are explicitly known to be text-only.
 - **Unified Dialogue/OCR:** The system MUST always run OCR for a frame if memory-based flags (`is_dialogue`, `is_menu_open`, or `battle_state > 0`) are set, even if `include_ocr` is globally False. Text content is critical for decision-making in these states.

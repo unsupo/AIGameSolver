@@ -34,7 +34,7 @@ class Logger(object):
 
     @staticmethod
     def category_name(category):
-        return ffi.string(lib.mLogCategoryName(category)).decode('UTF-8')
+        return ffi.string(lib.mLogCategoryName(category)).decode("UTF-8")
 
     @classmethod
     def install_default(cls, logger):

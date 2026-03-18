@@ -7,21 +7,22 @@ from autogameplayer.core.interfaces import BaseEmulator
 from autogameplayer.core.registry import Registry
 from autogameplayer.core.controllers import build_button_map, STANDARD_BUTTONS
 
+
 @Registry.register_emulator([".gb", ".gbc"])
 class PyBoyWrapper(BaseEmulator):
     def __init__(self, rom_path: str, window_type: str = "null"):
         self.pyboy = PyBoy(rom_path, window=window_type, sound=False)
-        self.pyboy.set_emulation_speed(0) # Max speed
+        self.pyboy.set_emulation_speed(0)  # Max speed
         self.experimental = False
-        
+
         # Advance 1500 frames (~25 seconds) to get past initial BIOS and into title screen
         for _ in range(1490):
-            self.pyboy.tick(render=False) # Fast skip
-        
+            self.pyboy.tick(render=False)  # Fast skip
+
         # Last 10 frames with rendering to ensure buffer is hot
         for _ in range(10):
             self.pyboy.tick(render=True)
-        
+
         self.button_map = build_button_map(WindowEvent, "ARROW", STANDARD_BUTTONS)
 
     @property
@@ -58,10 +59,11 @@ class PyBoyWrapper(BaseEmulator):
     def manage_checkpoint(self, action: str, slot: int):
         import os
         from autogameplayer.core.config import settings
+
         save_dir = settings.saves_dir
         os.makedirs(save_dir, exist_ok=True)
         state_file = save_dir / f"state_slot_{slot}.state"
-        
+
         if action == "save":
             with open(state_file, "wb") as f:
                 self.pyboy.save_state(f)
@@ -85,6 +87,12 @@ class PyBoyWrapper(BaseEmulator):
         # Step once to ensure RAM state reflects the most recent CPU execution
         self.pyboy.tick(render=False)
         return bytes(self.pyboy.memory[address : address + length])
+
+    def health_check(self) -> bool:
+        try:
+            return self.pyboy is not None
+        except Exception:
+            return False
 
     def close(self):
         self.pyboy.stop()

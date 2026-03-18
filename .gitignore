@@ -16,3 +16,5 @@ AutoGamePlayer.iml
 *.npy
 *.zip
 src_prompt_chunks_*/
+.venv/
+.gemini

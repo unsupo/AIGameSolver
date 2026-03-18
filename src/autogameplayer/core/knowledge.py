@@ -6,19 +6,23 @@ from autogameplayer.core.config import settings
 from autogameplayer.utils.llm import LLMClientProtocol
 from autogameplayer.utils.vector import cosine_similarity
 
+
 class KnowledgeBase:
     """A RAG system for external game knowledge (walkthroughs, wikis)."""
-    def __init__(self, client: LLMClientProtocol, model: str = None, storage_path: str = None):
+
+    def __init__(
+        self, client: LLMClientProtocol, model: str = None, storage_path: str = None
+    ):
         self.client = client
         if storage_path is None:
             self.storage_path = settings.models_dir / "external_knowledge.db"
         else:
             self.storage_path = Path(storage_path)
-            
+
         self.model = model or settings.default_embedding_model
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
-        
+
         # Trigger async auto-ingest in a background task or synchronously check
         if not self.is_ready:
             print("📚 Knowledge Base empty. Searching for data to ingest...")
@@ -27,6 +31,7 @@ class KnowledgeBase:
     def sync_auto_ingest(self):
         """Synchronous wrapper for auto_ingest to be called from __init__."""
         import asyncio
+
         try:
             # We use a temporary event loop if one isn't running, or run_coroutine_threadsafe
             loop = asyncio.get_event_loop()
@@ -80,17 +85,17 @@ class KnowledgeBase:
         """Chunks and embeds a text file into the DB."""
         # Simple chunking by paragraph or fixed length
         chunks = [c.strip() for c in text.split("\n\n") if len(c.strip()) > 20]
-        
+
         print(f"📚 Ingesting {len(chunks)} knowledge chunks from {source}...")
         for chunk in chunks:
             try:
                 emb_list = await self.client.acreate_embedding(chunk, model=self.model)
                 embedding = np.array(emb_list, dtype=np.float32)
-                
+
                 with sqlite3.connect(str(self.storage_path)) as conn:
                     conn.execute(
                         "INSERT INTO knowledge (source, content, embedding) VALUES (?, ?, ?)",
-                        (source, chunk, embedding.tobytes())
+                        (source, chunk, embedding.tobytes()),
                     )
             except Exception as e:
                 print(f"⚠️ Knowledge ingestion failed for chunk: {e}")
@@ -100,7 +105,7 @@ class KnowledgeBase:
         try:
             emb_list = await self.client.acreate_embedding(query_text, model=self.model)
             query_embedding = np.array(emb_list, dtype=np.float32)
-            
+
             results = []
             with sqlite3.connect(str(self.storage_path)) as conn:
                 cursor = conn.execute("SELECT content, embedding FROM knowledge")
@@ -110,7 +115,7 @@ class KnowledgeBase:
                         m_emb = np.frombuffer(emb_bytes, dtype=np.float32)
                         sim = cosine_similarity(query_embedding, m_emb)
                         results.append((sim, content))
-            
+
             results.sort(key=lambda x: x[0], reverse=True)
             snippets = [t for sim, t in results[:top_k] if sim > 0.6]
             if snippets:
